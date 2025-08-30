@@ -15,7 +15,7 @@ def authenticate_user(username, password):
             "role": "student",          #for testing kay wala pa naayos ang users ta sir, change lang ning role sa "faculty", "registrar", "student"
             "collection": "students"
         }
-    
+    #test
     # Check faculty collection (if you have one)
     try:
         user = db["teachers"].find_one({"username": username})
