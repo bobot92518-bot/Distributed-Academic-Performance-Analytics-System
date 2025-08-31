@@ -123,7 +123,7 @@ def display_faculty_content(current_page):
         if current_page == "faculty_main" or current_page is None:
             
             try:
-                import pages.dash_faculty as dash_faculty
+                import pages.Faculty.dash_faculty as dash_faculty
                 if hasattr(dash_faculty, 'main'):
                     dash_faculty.main()
                 elif hasattr(dash_faculty, 'show_faculty_dashboard'):
