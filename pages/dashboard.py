@@ -168,7 +168,7 @@ def display_registrar_content(current_page):
         if current_page == "registrar_main" or current_page is None:
             # Try to load registrar module
             try:
-                import pages.dash_registrar as dash_registrar
+                import pages.Registrar.dash_registrar as dash_registrar
                 if hasattr(dash_registrar, 'main'):
                     dash_registrar.main()
                 elif hasattr(dash_registrar, 'show_registrar_dashboard'):
