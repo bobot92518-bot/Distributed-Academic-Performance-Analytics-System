@@ -101,7 +101,7 @@ def display_faculty_content(current_page):
 def display_student_content(current_page):
     try:
         if current_page == "student_main":
-            import pages.student.dash_student as dash_student
+            import pages.student.stddash as dash_student
             run_module(dash_student)
     except Exception as e:
         st.error(f"Error displaying student content: {e}")
