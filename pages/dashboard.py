@@ -146,7 +146,7 @@ def display_student_content(current_page):
             
             # Try to load student module
             try:
-                import pages.dash_student as dash_student
+                import student.dash_student as dash_student
                 if hasattr(dash_student, 'main'):
                     dash_student.main()
                 elif hasattr(dash_student, 'show_student_dashboard'):
