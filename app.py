@@ -6,108 +6,94 @@ import time
 def authenticate_user(username, password):
     """Authenticate user and return user data with role"""
     db = db_connect()
-    
+
     # Check students collection
     user = db["students"].find_one({"username": username})
     if user and user.get("Password") == password:
-        return {
-            "user_data": user,
-            "role": "student",          #for testing kay wala pa naayos ang users ta sir, change lang ning role sa "faculty", "registrar", "student"
-            "collection": "students"
-        }
-    #test1
-    # Check faculty collection (if you have one)
+        return {"user_data": user, "role": "student"}
+
+    # Check faculty collection
     try:
         user = db["teachers"].find_one({"Username": username})
         if user and user.get("Password") == password:
-            return {
-                "user_data": user,
-                "role": "faculty",
-                "collection": "teachers"
-            }
+            return {"user_data": user, "role": "faculty"}
     except:
-        pass  # Faculty collection might not exist
-    
+        pass
+
     # Check registrars collection
     user = db["registrars"].find_one({"Username": username})
     if user and user.get("Password") == password:
-        return {
-            "user_data": user,
-            "role": "registrar",
-            "collection": "registrars"
-        }
-    
+        return {"user_data": user, "role": "registrar"}
+
     return None
 
 def main():
     # Page config
     st.set_page_config(page_title="DAPAS Login", layout="centered")
-    
-    # Check if already authenticated 
 
-    
+    # Hide sidebar completely
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] { display: none; }
+            [data-testid="stSidebarNav"] { display: none; }
+            [data-testid="stSidebarContent"] { display: none; }
+            .block-container {
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     # Title
     st.markdown(
         "<h1 style='text-align: center; color: #4B8BBE;'>Welcome to DAPAS</h1>"
         "<h3 style='text-align: center; color: #306998;'>Distributed Academic Performance Analytics System</h3>",
         unsafe_allow_html=True
     )
-    
-    # Add some spacing
+
     st.markdown("<br>", unsafe_allow_html=True)
-    
+
     # Login form
     with st.form("login_form"):
         st.markdown("<h3 style='text-align: center;'>🔑 Login</h3>", unsafe_allow_html=True)
-        
 
         username = st.text_input("👤 Username", placeholder="Enter your username")
         password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
-            
-            
+
         st.markdown("<br>", unsafe_allow_html=True)
         login_button = st.form_submit_button("Login", use_container_width=True)
-    
+
     # Login logic
     if login_button:
         if not username or not password:
             st.error("❌ Please enter both username and password.")
             return
-        
-        # Show loading spinner
+
         with st.spinner("Authenticating..."):
             auth_result = authenticate_user(username, password)
-        
+
         if auth_result:
-            # Initialize session state for authenticated user
+            # Store session data
             st.session_state.authenticated = True
             st.session_state.username = username
             st.session_state.role = auth_result["role"]
             st.session_state.user_data = auth_result["user_data"]
-            st.session_state.collection = auth_result["collection"]
-            
-            # Store user ID for easy access
-            st.session_state.user_id = auth_result["user_data"].get("_id")
-            
-            st.success(f"✅ Welcome, {username}! Logged in as {auth_result['role'].title()}")
-            
-            # Small delay for better UX
+
+            st.success(f"✅ Welcome, {username}! You are logged in as {auth_result['role'].title()}")
             st.balloons()
             time.sleep(1)
-            
-            # Switch to dashboard page
-            st.switch_page("./pages/dashboard.py")
+
+            # Redirect to dashboard page
+            st.switch_page("pages/dashboard.py")
         else:
             st.error("❌ Invalid username or password. Please try again.")
-            
-            # Optional: Add forgot password or registration links
             st.markdown(
                 "<p style='text-align: center; margin-top: 20px;'>"
                 "<small>Don't have an account? Contact your administrator.</small></p>",
                 unsafe_allow_html=True
             )
-    
-    # Footer with copyright, current year, and version
+
+    # Footer
     st.markdown("<br><br>", unsafe_allow_html=True)
     current_year = datetime.now().year
     st.markdown(
@@ -116,12 +102,5 @@ def main():
         unsafe_allow_html=True
     )
 
-def logout():
-    """Handle logout functionality"""
-    st.session_state.clear()
-    st.rerun()
-
 if __name__ == "__main__":
     main()
-
-    #this is sample comment
