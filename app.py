@@ -1,29 +1,69 @@
 import streamlit as st
+import pandas as pd
 from datetime import datetime
 from dbconnect import *
 import time
+import os # Make sure this returns a valid MongoDB client
+
+# Paths to pickle caches
+student_Cache = "pkl/students.pkl"
+teacher_Cache = "pkl/teachers.pkl"
+registrar_Cache = "pkl/registrars.pkl"
 
 def authenticate_user(username, password):
     """Authenticate user and return user data with role"""
     db = db_connect()
 
-    # Check students collection
-    user = db["students"].find_one({"username": username})
-    if user and user.get("Password") == password:
-        return {"user_data": user, "role": "student"}
+    # STUDENT
+    if os.path.exists(student_Cache):
+        students = pd.read_pickle(student_Cache)
+        students_df = pd.DataFrame(students) if isinstance(students, list) else students
+    else:
+        students = list(db["students"].find({}))
+        students_df = pd.DataFrame(students)
+        students_df.to_pickle(student_Cache)
 
-    # Check faculty collection
-    try:
-        user = db["teachers"].find_one({"Username": username})
-        if user and user.get("Password") == password:
-            return {"user_data": user, "role": "faculty"}
-    except:
-        pass
+    student = students_df[students_df["username"] == username]
+    if not student.empty and student.iloc[0]["Password"] == password:
+        return {
+            "user_data": student.iloc[0].to_dict(),
+            "role": "student",
+            "collection": "students"
+        }
 
-    # Check registrars collection
-    user = db["registrars"].find_one({"Username": username})
-    if user and user.get("Password") == password:
-        return {"user_data": user, "role": "registrar"}
+    # FACULTY
+    if os.path.exists(teacher_Cache):
+        teachers = pd.read_pickle(teacher_Cache)
+        teachers_df = pd.DataFrame(teachers) if isinstance(teachers, list) else teachers
+    else:
+        teachers = list(db["teachers"].find({}))
+        teachers_df = pd.DataFrame(teachers)
+        teachers_df.to_pickle(teacher_Cache)
+
+    teacher = teachers_df[teachers_df["Username"] == username]
+    if not teacher.empty and teacher.iloc[0]["Password"] == password:
+        return {
+            "user_data": teacher.iloc[0].to_dict(),
+            "role": "faculty",
+            "collection": "teachers"
+        }
+
+    # REGISTRAR
+    if os.path.exists(registrar_Cache):
+        registrars = pd.read_pickle(registrar_Cache)
+        registrars_df = pd.DataFrame(registrars) if isinstance(registrars, list) else registrars
+    else:
+        registrars = list(db["registrars"].find({}))
+        registrars_df = pd.DataFrame(registrars)
+        registrars_df.to_pickle(registrar_Cache)
+
+    registrar = registrars_df[registrars_df["Username"] == username]
+    if not registrar.empty and registrar.iloc[0]["Password"] == password:
+        return {
+            "user_data": registrar.iloc[0].to_dict(),
+            "role": "registrar",
+            "collection": "registrars"
+        }
 
     return None
 
