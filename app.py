@@ -18,7 +18,7 @@ def authenticate_user(username, password):
     
     # Check faculty collection (if you have one)
     try:
-        user = db["teachers"].find_one({"username": username})
+        user = db["teachers"].find_one({"Username": username})
         if user and user.get("Password") == password:
             return {
                 "user_data": user,
@@ -29,7 +29,7 @@ def authenticate_user(username, password):
         pass  # Faculty collection might not exist
     
     # Check registrars collection
-    user = db["registrars"].find_one({"username": username})
+    user = db["registrars"].find_one({"Username": username})
     if user and user.get("Password") == password:
         return {
             "user_data": user,
