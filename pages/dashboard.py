@@ -68,7 +68,7 @@ def setup_sidebar(role, username, display_name):
             st.session_state.current_page = "grade_management"
         if st.sidebar.button("👥 Student Records", key="nav_students", use_container_width=True):
             st.session_state.current_page = "student_records"
-            
+            #adasdd x
     elif role == "student":
         if st.sidebar.button("🎓 Student Dashboard", key="nav_student", use_container_width=True):
             st.session_state.current_page = "student_main"
