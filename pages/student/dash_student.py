@@ -20,6 +20,51 @@ students_col = db["students"]
 grades_col = db["grades"]
 subjects_col = db["subjects"]
 semester_col = db["semesters"]
+@st.cache_data(ttl=300)
+def load_data():
+    students = list(students_col.find({}, {"_id": 1, "Name": 1, "Course": 1, "YearLevel": 1}))
+    df_students = pd.DataFrame(students).rename(columns={"_id": "StudentID"})
+
+    grades = list(
+        grades_col.find(
+            {},
+            {
+                "_id": 0,
+                "StudentID": 1,
+                "Grades": 1,
+                "SubjectCodes": 1,
+                "Teachers": 1,
+                "SemesterID": 1,
+            },
+        )
+    )
+    df_grades = pd.DataFrame(grades)
+    
+    semesters = list(semester_col.find({}, {"_id": 1, "Semester": 1, "SchoolYear": 1}))
+    df_semesters = pd.DataFrame(semesters).rename(columns={"_id": "SemesterID"})
+
+    subjects = list(subjects_col.find({}, {"_id": 1, "Description": 1}))
+    df_subjects = pd.DataFrame(subjects).rename(columns={"_id": "SubjectCode"})
+
+    # Merge all collections
+    df = pd.merge(df_grades, df_students, on="StudentID", how="left")
+    df = pd.merge(df, df_semesters, on="SemesterID", how="left")
+
+    df_exploded = df.explode(["Grades", "SubjectCodes", "Teachers"]).reset_index(drop=True)
+    df_exploded.rename(
+        columns={"Grades": "Grade", "SubjectCodes": "SubjectCode", "Teachers": "Teacher"},
+        inplace=True,
+    )
+    df_exploded["Grade"] = pd.to_numeric(df_exploded["Grade"], errors="coerce")
+
+    # Merge subjects for descriptions
+    df_exploded = pd.merge(df_exploded, df_subjects, on="SubjectCode", how="left")
+
+    return df_exploded
+
+
+df_exploded = load_data()
+
 
 # -----------------------------
 # Step 3: Authentication check
