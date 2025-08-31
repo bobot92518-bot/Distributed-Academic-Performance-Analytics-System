@@ -11,6 +11,7 @@ def authenticate_user(username, password):
     user = db["students"].find_one({"username": username})
     if user and user.get("Password") == password:
         return {"user_data": user, "role": "student"}
+    
 
     # Check faculty collection
     try:
@@ -83,8 +84,10 @@ def main():
             st.balloons()
             time.sleep(1)
 
-            # Redirect to dashboard page
-            st.switch_page("pages/dashboard.py")
+            if st.session_state.role == "student":
+                st.switch_page("pages/stddash.py")
+            else:
+                st.switch_page("pages/dashboard.py")
         else:
             st.error("❌ Invalid username or password. Please try again.")
             st.markdown(
