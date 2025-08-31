@@ -123,7 +123,6 @@ def main():
             st.balloons()
             time.sleep(1)
 
-            # Redirect to dashboard page
             st.switch_page("pages/dashboard.py")
         else:
             st.error("❌ Invalid username or password. Please try again.")
