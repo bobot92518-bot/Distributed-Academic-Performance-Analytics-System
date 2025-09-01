@@ -1,37 +1,49 @@
 import streamlit as st
 import pandas as pd
 from bson import ObjectId
-from dbconnect import *
+
+# ------------------ Paths to Pickle Files ------------------ #
+student_cache = "pkl/students.pkl"
+grades_cache = "pkl/grades.pkl"
+semesters_cache = "pkl/semesters.pkl"
 
 # ------------------ Helper Functions ------------------ #
 def get_student_info(username):
-    """Fetch student info from MongoDB by username"""
-    db = db_connect()
-    students_col = db["students"]
-    return students_col.find_one({"username": username})
+    """Fetch student info from pickle by username"""
+    if not st.session_state.get("students_df"):
+        students = pd.read_pickle(student_cache)
+        students_df = pd.DataFrame(students) if isinstance(students, list) else students
+        st.session_state.students_df = students_df
+    else:
+        students_df = st.session_state.students_df
+
+    match = students_df[students_df["username"] == username]
+    return match.iloc[0].to_dict() if not match.empty else None
 
 
 def get_student_grades(student_id):
     """Fetch grades of a student by their student_id and join with semesters"""
-    db = db_connect()
-    grades_col = db["grades"]
-    sem_col = db["semesters"]
+    grades = pd.read_pickle(grades_cache)
+    semesters = pd.read_pickle(semesters_cache)
 
-    grades = list(grades_col.find({"StudentID": student_id}))
+    grades_df = pd.DataFrame(grades) if isinstance(grades, list) else grades
+    sem_df = pd.DataFrame(semesters) if isinstance(semesters, list) else semesters
 
-    # Attach Semester + SchoolYear from semesters collection
-    for g in grades:
-        sem_id = g.get("SemesterID")
-        if sem_id:
-            if isinstance(sem_id, ObjectId):
-                sem = sem_col.find_one({"_id": sem_id})
-            else:
-                sem = sem_col.find_one({"_id": sem_id})
-            if sem:
-                g["Semester"] = sem.get("Semester", "")
-                g["SchoolYear"] = sem.get("SchoolYear", "")
-    return grades
+    student_grades = grades_df[grades_df["StudentID"] == student_id].copy()
 
+    # Attach Semester + SchoolYear from semesters
+    if not student_grades.empty:
+        student_grades["Semester"] = ""
+        student_grades["SchoolYear"] = ""
+
+        for idx, row in student_grades.iterrows():
+            sem_id = row.get("SemesterID")
+            if sem_id:
+                match = sem_df[sem_df["_id"] == sem_id]
+                if not match.empty:
+                    student_grades.at[idx, "Semester"] = match.iloc[0].get("Semester", "")
+                    student_grades.at[idx, "SchoolYear"] = match.iloc[0].get("SchoolYear", "")
+    return student_grades.to_dict(orient="records")
 
 # ------------------ Student Dashboard ------------------ #
 def show_student_dashboard():
@@ -43,39 +55,32 @@ def show_student_dashboard():
     student = get_student_info(username)
 
     if not student:
-        st.error("Student record not found in database.")
+        st.error("Student record not found.")
         st.stop()
 
-    # Default student dashboard
     st.markdown("## 🎓 Student Dashboard")
     st.write(f"Welcome, **{student.get('Name', username)}** 👋")
     st.write("Here you can view your grades, assignments, and academic progress.")
 
-    # Quick stats
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Current GPA", student.get("GPA", "N/A"))
     with col2:
         st.metric("Course", student.get("Course", "N/A"))
 
-    # --- Student Grades --- #
     st.markdown("### 📝 Academic Transcript")
 
     grades = get_student_grades(student["_id"])
 
     if grades:
         df = pd.DataFrame(grades)
-
-        # Drop unused fields
         df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
 
-        # ✅ Group by SchoolYear + Semester
         if "Semester" in df.columns and "SchoolYear" in df.columns:
             grouped = df.groupby(["SchoolYear", "Semester"])
             for (sy, sem), sem_df in grouped:
                 st.subheader(f"{sy} - Semester {sem}")
 
-                # --- If values are lists, expand them so each subject = one row
                 if (
                     "SubjectCodes" in sem_df
                     and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any()
@@ -94,10 +99,8 @@ def show_student_dashboard():
                         }
                     )
 
-                # Show as table (each subject = one row)
                 st.table(expanded_df)
 
-                # --- Compute average
                 if "Grade" in expanded_df.columns:
                     valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
                     if not valid_grades.empty:
@@ -108,22 +111,17 @@ def show_student_dashboard():
 
                 st.markdown("---")
         else:
-            st.warning("No 'Semester' or 'SchoolYear' field found in grades collection.")
+            st.warning("Missing 'Semester' or 'SchoolYear' fields.")
             st.dataframe(df, use_container_width=True)
     else:
         st.info("No grades found for this student.")
 
-    # Logout button
     if st.button("Logout"):
         logout_message = f"Goodbye, {st.session_state.get('username', 'User')}! 👋"
         st.session_state.clear()
         st.success(logout_message)
         st.info("Redirecting to login page...")
-
-        import time
-        time.sleep(2)
         st.switch_page("app.py")
-
 
 # ------------------ Run Page ------------------ #
 if __name__ == "__main__":
