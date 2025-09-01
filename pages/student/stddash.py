@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from bson import ObjectId
+import os
 
 # ------------------ Paths to Pickle Files ------------------ #
 student_cache = "pkl/students.pkl"
@@ -10,19 +10,21 @@ semesters_cache = "pkl/semesters.pkl"
 # ------------------ Helper Functions ------------------ #
 def get_student_info(username):
     """Fetch student info from pickle by username"""
-    if not st.session_state.get("students_df"):
-        students = pd.read_pickle(student_cache)
-        students_df = pd.DataFrame(students) if isinstance(students, list) else students
-        st.session_state.students_df = students_df
-    else:
-        students_df = st.session_state.students_df
+    if not os.path.exists(student_cache):
+        st.error("Student cache file not found.")
+        st.stop()
 
+    students = pd.read_pickle(student_cache)
+    students_df = pd.DataFrame(students) if isinstance(students, list) else students
     match = students_df[students_df["username"] == username]
     return match.iloc[0].to_dict() if not match.empty else None
 
-
 def get_student_grades(student_id):
     """Fetch grades of a student by their student_id and join with semesters"""
+    if not os.path.exists(grades_cache) or not os.path.exists(semesters_cache):
+        st.error("Grades or semesters cache file not found.")
+        st.stop()
+
     grades = pd.read_pickle(grades_cache)
     semesters = pd.read_pickle(semesters_cache)
 
@@ -38,14 +40,13 @@ def get_student_grades(student_id):
 
         for idx, row in student_grades.iterrows():
             sem_id = row.get("SemesterID")
-            if sem_id:
-                match = sem_df[sem_df["_id"] == sem_id]
-                if not match.empty:
-                    student_grades.at[idx, "Semester"] = match.iloc[0].get("Semester", "")
-                    student_grades.at[idx, "SchoolYear"] = match.iloc[0].get("SchoolYear", "")
+            match = sem_df[sem_df["_id"] == sem_id]
+            if not match.empty:
+                student_grades.at[idx, "Semester"] = match.iloc[0].get("Semester", "")
+                student_grades.at[idx, "SchoolYear"] = match.iloc[0].get("SchoolYear", "")
     return student_grades.to_dict(orient="records")
 
-# ------------------ Student Dashboard ------------------ #
+# ------------------ Main Dashboard Function ------------------ #
 def show_student_dashboard():
     if 'authenticated' not in st.session_state or not st.session_state.authenticated or st.session_state.role != "student":
         st.error("Unauthorized access. Please login as Student.")
@@ -99,7 +100,7 @@ def show_student_dashboard():
                         }
                     )
 
-                st.table(expanded_df)
+                st.dataframe(expanded_df, use_container_width=True)
 
                 if "Grade" in expanded_df.columns:
                     valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
@@ -123,14 +124,12 @@ def show_student_dashboard():
         st.info("Redirecting to login page...")
         st.switch_page("app.py")
 
-# ------------------ Run Page ------------------ #
-if __name__ == "__main__":
+# ------------------ Entry Point ------------------ #
+def main():
     st.set_page_config(
         page_title="DAPAS Student Dashboard",
         page_icon="🎓",
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    show_student_dashboard()
-else:
     show_student_dashboard()
