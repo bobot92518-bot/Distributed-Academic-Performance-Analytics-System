@@ -48,6 +48,7 @@ def get_student_grades(student_id):
 
 # ------------------ Main Dashboard Function ------------------ #
 def show_student_dashboard():
+    st.write("Here you can view your grades, assignments, and academic progress.")
     if 'authenticated' not in st.session_state or not st.session_state.authenticated or st.session_state.role != "student":
         st.error("Unauthorized access. Please login as Student.")
         st.stop()
@@ -59,9 +60,7 @@ def show_student_dashboard():
         st.error("Student record not found.")
         st.stop()
 
-    st.markdown("## 🎓 Student Dashboard")
-    st.write(f"Welcome, **{student.get('Name', username)}** 👋")
-    st.write("Here you can view your grades, assignments, and academic progress.")
+    grades = get_student_grades(student["_id"])
 
     col1, col2 = st.columns(2)
     with col1:
@@ -70,8 +69,6 @@ def show_student_dashboard():
         st.metric("Course", student.get("Course", "N/A"))
 
     st.markdown("### 📝 Academic Transcript")
-
-    grades = get_student_grades(student["_id"])
 
     if grades:
         df = pd.DataFrame(grades)
@@ -116,13 +113,6 @@ def show_student_dashboard():
             st.dataframe(df, use_container_width=True)
     else:
         st.info("No grades found for this student.")
-
-    if st.button("Logout"):
-        logout_message = f"Goodbye, {st.session_state.get('username', 'User')}! 👋"
-        st.session_state.clear()
-        st.success(logout_message)
-        st.info("Redirecting to login page...")
-        st.switch_page("app.py")
 
 # ------------------ Entry Point ------------------ #
 def main():
