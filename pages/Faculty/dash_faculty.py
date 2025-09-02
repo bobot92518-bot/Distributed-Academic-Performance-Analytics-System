@@ -1,34 +1,11 @@
 import streamlit as st
 from datetime import datetime
 import pandas as pd
+import os
+from global_utils import load_pkl_data
+from pages.Faculty.dash_faculty_tab1 import show_faculty_tab1_info
+from pages.Faculty.dash_faculty_tab2 import show_faculty_tab2_info
 
-def check_faculty_auth():
-    """Check if user is authenticated and has faculty role"""
-    if ('authenticated' not in st.session_state or 
-        not st.session_state.authenticated or 
-        st.session_state.role != "faculty"):
-        st.error("🚫 Unauthorized access. Please login as Faculty.")
-        
-        # Provide login button
-        if st.button("🔑 Go to Login"):
-            st.session_state.clear()
-            try:
-                st.switch_page("app.py")
-            except:
-                st.rerun()
-        st.stop()
-
-def get_faculty_name():
-    """Get faculty display name from session data"""
-    user_data = st.session_state.get('user_data', {})
-    username = st.session_state.get('username', 'Faculty')
-    
-    # Try to get full name
-    first_name = user_data.get('first_name', '')
-    last_name = user_data.get('last_name', '')
-    full_name = f"{first_name} {last_name}".strip()
-    
-    return full_name if full_name else username
 
 def show_faculty_metrics():
     """Display faculty dashboard metrics"""
@@ -119,66 +96,6 @@ def show_quick_actions():
         if st.button("📈 Analytics", use_container_width=True, key="analytics"):
             st.info("🚧 Analytics dashboard coming soon!")
 
-def show_current_subjects():
-    """Display current subjects being taught"""
-    st.markdown("### 📚 Current Subjects")
-    
-    # Sample subjects data
-    subjects_data = [
-        {
-            "Subject Code": "CS 101",
-            "Subject Name": "Introduction to Computer Science",
-            "Students": 45,
-            "Schedule": "MWF 9:00-10:00 AM",
-            "Room": "Lab 201",
-            "Status": "🟢 Active"
-        },
-        {
-            "Subject Code": "CS 201", 
-            "Subject Name": "Data Structures",
-            "Students": 32,
-            "Schedule": "TTh 2:00-3:30 PM",
-            "Room": "Room 305",
-            "Status": "🟢 Active"
-        },
-        {
-            "Subject Code": "CS 301",
-            "Subject Name": "Database Systems",
-            "Students": 28,
-            "Schedule": "MWF 11:00-12:00 PM", 
-            "Room": "Lab 102",
-            "Status": "🟢 Active"
-        },
-        {
-            "Subject Code": "CS 401",
-            "Subject Name": "Software Engineering",
-            "Students": 22,
-            "Schedule": "TTh 10:00-11:30 AM",
-            "Room": "Room 401",
-            "Status": "🟡 Planning"
-        }
-    ]
-    
-    # Convert to DataFrame for better display
-    df = pd.DataFrame(subjects_data)
-    
-    # Display as interactive table
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Students": st.column_config.NumberColumn(
-                "Students",
-                help="Number of enrolled students",
-                format="%d 👥"
-            ),
-            "Status": st.column_config.TextColumn(
-                "Status",
-                help="Current status of the subject"
-            )
-        }
-    )
 
 def show_upcoming_deadlines():
     """Display upcoming deadlines and important dates"""
@@ -206,106 +123,47 @@ def show_upcoming_deadlines():
         
         st.divider()
 
+
+current_faculty = user_data = st.session_state.get('user_data', {}).get('Teacher', '')
+
+
 def show_faculty_dashboard():
-    """Main faculty dashboard display function"""
-    # Check authentication first
-    check_faculty_auth()
     
-    # Page configuration
     st.set_page_config(
         page_title="DAPAS - Faculty Dashboard",
-        page_icon="👨‍🏫",
+        page_icon="🏫",
         layout="wide"
     )
     
-    # Get faculty name
-    faculty_name = get_faculty_name()
-    
-    # Header
-    st.title("👨‍🏫 Faculty Dashboard")
-    st.markdown(f"### Welcome back, **{faculty_name}**! 👋")
-    st.markdown(f"*Last login: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}*")
-    
-    st.markdown("---")
-    
-    # Main metrics
-    show_faculty_metrics()
-    
-    st.markdown("---")
-    
-    # Create tabs for different sections
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Overview", "📚 Subjects", "🏆 Grades", "🎓 Students"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📋 Class Grade Distribution",
+        "📈 Student Progress Tracker",
+        "📚 Subject Difficulty Heatmap",
+        "👥 Intervention Candidates List",
+        "⏳ Grade Submission Status",
+        "🔍 Custom Query Builder"
+    ])
 
     with tab1:
-        st.subheader("📋 Overview")
-        st.write("General summary of students, faculty, and registrar activity.")
-
+        st.subheader("📋 Class Grade Distribution")
+        show_faculty_tab1_info()
     with tab2:
-        st.subheader("📚 Subjects")
-        st.write("List of subjects, descriptions, and assigned teachers.")
-        show_current_subjects()
+        st.subheader("📈 Student Progress Tracker")
+        show_faculty_tab2_info()  
 
     with tab3:
-        st.subheader("🏆 Grades")
-        st.write("Student grades and performance analytics.")
+        st.subheader("📚 Subject Difficulty Heatmap")
 
     with tab4:
-        st.subheader("🎓 Students")
-        st.write("Manage student records, profiles, and enrollment.")
-    
-    if st.button("Logout"):
-        """Handle user logout"""
-        # Store logout message before clearing session
-        logout_message = f"Goodbye, {st.session_state.get('username', 'User')}! 👋"
-        
-        # Clear all session state
-        st.session_state.clear()
-        
-        # Show logout message
-        st.success(logout_message)
-        st.info("Redirecting to login page...")
-        
-        # Brief delay for user feedback
-        import time
-        time.sleep(3)
-        
-        # Rerun to redirect to login
-        st.switch_page("app.py")
-    
-    # Logout section in sidebar
-    with st.sidebar:
-        st.markdown("### 👤 Account")
-        st.markdown(f"**Faculty:** {faculty_name}")
-        st.markdown(f"**Role:** {st.session_state.role.title()}")
-        st.markdown("---")
-        
-        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
-            """Handle user logout"""
-            # Store logout message before clearing session
-            logout_message = f"Goodbye, {st.session_state.get('username', 'User')}! 👋"
-            
-            # Clear all session state
-            st.session_state.clear()
-            
-            # Show logout message
-            st.success(logout_message)
-            st.info("Redirecting to login page...")
-            
-            # Brief delay for user feedback
-            import time
-            time.sleep(3)
-            
-            # Rerun to redirect to login
-            st.switch_page("app.py")
+        st.subheader("👥 Intervention Candidates List")
 
-def main():
-    """Main function to run the faculty dashboard"""
-    show_faculty_dashboard()
+    with tab5:
+        st.subheader("⏳ Grade Submission Status")
 
-# Run the dashboard if this file is executed directly
+    with tab6:
+        st.subheader("🔍 Custom Query Builder")
+
+    
+
 if __name__ == "__main__":
-    main()
-else:
-    # If imported, check auth and show dashboard
-    check_faculty_auth()
     show_faculty_dashboard()

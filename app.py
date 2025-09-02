@@ -2,26 +2,22 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from dbconnect import *
+from global_utils import students_cache, teachers_cache, registrar_cache
 import time
 import os # Make sure this returns a valid MongoDB client
-
-# Paths to pickle caches
-student_Cache = "pkl/students.pkl"
-teacher_Cache = "pkl/teachers.pkl"
-registrar_Cache = "pkl/registrars.pkl"
 
 def authenticate_user(username, password):
     """Authenticate user and return user data with role"""
     db = db_connect()
 
     # STUDENT
-    if os.path.exists(student_Cache):
-        students = pd.read_pickle(student_Cache)
+    if os.path.exists(students_cache):
+        students = pd.read_pickle(students_cache)
         students_df = pd.DataFrame(students) if isinstance(students, list) else students
     else:
         students = list(db["students"].find({}))
         students_df = pd.DataFrame(students)
-        students_df.to_pickle(student_Cache)
+        students_df.to_pickle(students_cache)
 
     student = students_df[students_df["username"] == username]
     if not student.empty and student.iloc[0]["Password"] == password:
@@ -32,13 +28,13 @@ def authenticate_user(username, password):
         }
 
     # FACULTY
-    if os.path.exists(teacher_Cache):
-        teachers = pd.read_pickle(teacher_Cache)
+    if os.path.exists(teachers_cache):
+        teachers = pd.read_pickle(teachers_cache)
         teachers_df = pd.DataFrame(teachers) if isinstance(teachers, list) else teachers
     else:
         teachers = list(db["teachers"].find({}))
         teachers_df = pd.DataFrame(teachers)
-        teachers_df.to_pickle(teacher_Cache)
+        teachers_df.to_pickle(teachers_cache)
 
     teacher = teachers_df[teachers_df["Username"] == username]
     if not teacher.empty and teacher.iloc[0]["Password"] == password:
@@ -49,13 +45,13 @@ def authenticate_user(username, password):
         }
 
     # REGISTRAR
-    if os.path.exists(registrar_Cache):
-        registrars = pd.read_pickle(registrar_Cache)
+    if os.path.exists(registrar_cache):
+        registrars = pd.read_pickle(registrar_cache)
         registrars_df = pd.DataFrame(registrars) if isinstance(registrars, list) else registrars
     else:
         registrars = list(db["registrars"].find({}))
         registrars_df = pd.DataFrame(registrars)
-        registrars_df.to_pickle(registrar_Cache)
+        registrars_df.to_pickle(registrar_cache)
 
     registrar = registrars_df[registrars_df["Username"] == username]
     if not registrar.empty and registrar.iloc[0]["Password"] == password:

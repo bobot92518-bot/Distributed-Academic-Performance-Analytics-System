@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime
 import time
+import os
 
 # Set page config
 st.set_page_config(
@@ -12,11 +13,13 @@ st.set_page_config(
 
 def show_dashboard():
     """Main dashboard function that handles navigation and role-based access"""
-
+    
     # Authentication check
     if 'authenticated' not in st.session_state or not st.session_state.authenticated:
         st.error("🔒 Authentication required. Please login first.")
-        st.stop()
+        st.info("Redirecting to login page...")
+        time.sleep(1)
+        st.switch_page("app.py")
 
     role = st.session_state.get("role", None)
     username = st.session_state.get("username", "Unknown User")
@@ -26,9 +29,20 @@ def show_dashboard():
         st.error("❌ Invalid role or session expired. Please login again.")
         st.session_state.clear()
         st.stop()
-
-    st.title(f"🏫 DAPAS Dashboard - {role.title()}")
-    display_name = user_data.get("Name", username)
+    
+    icon = "🏫"
+    if role == "faculty":
+        icon = "👨‍🏫"
+    elif role == "student":
+        icon = "🎓"
+    elif role == "registrar":
+        icon = "📋"
+    
+    st.title(f"{icon} {role.title()} Dashboard")
+    if role == "faculty":
+        display_name = user_data.get("Teacher", username)
+    else:
+        display_name = user_data.get("Name", username)
     st.markdown(f"### Welcome back, **{display_name}**! 👋")
 
     setup_sidebar(role, username, display_name)
@@ -36,29 +50,27 @@ def show_dashboard():
 
 def setup_sidebar(role, username, display_name):
     """Sidebar navigation based on user role"""
-    st.sidebar.title("🧭 Dashboard")
+    
+    st.markdown("""
+        <style>
+            /* Hide "Pages" header */
+            div[data-testid="stSidebarHeader"] {display: none;}
+            
+            /* Hide entire nav container */
+            div[data-testid="stSidebarNav"] {display: none;}
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.sidebar.markdown("<h2 style='font-size:60px; text-align:center; margin:0;'>🏫</h2>",unsafe_allow_html=True)
+
+    st.sidebar.markdown("<h2 style='font-size:24px; text-align:center; margin:0; padding:0'>Distributed Academic Performance Analytics System</h2>",unsafe_allow_html=True)
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 👤 User Information")
     st.sidebar.markdown(f"**Name:** {display_name}")
     st.sidebar.markdown(f"**Username:** {username}")
     st.sidebar.markdown(f"**Role:** {role.title()}")
     st.sidebar.markdown(f"**Login Time:** {datetime.now().strftime('%H:%M')}")
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📋 Quick Actions")
 
-    if role == "faculty":
-        sidebar_button("👨‍🏫 Faculty Dashboard", "faculty_main")
-        sidebar_button("📊 Grade Management", "grade_management")
-        sidebar_button("👥 Student Records", "student_records")
-    elif role == "student":
-        sidebar_button("🎓 Student Dashboard", "student_main")
-        sidebar_button("📈 My Grades", "my_grades")
-        sidebar_button("📚 Course Schedule", "schedule")
-    elif role == "registrar":
-        sidebar_button("📋 Registrar Dashboard", "registrar_main")
-        sidebar_button("🏫 Manage Courses", "manage_courses")
-        sidebar_button("👨‍🎓 Manage Students", "manage_students")
-        sidebar_button("👨‍🏫 Manage Faculty", "manage_faculty")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ System")
@@ -68,6 +80,7 @@ def setup_sidebar(role, username, display_name):
         st.rerun()
     if st.sidebar.button("🚪 Logout", use_container_width=True, type="secondary"):
         logout()
+    
 
 def sidebar_button(label, page_key):
     if st.sidebar.button(label, key=page_key, use_container_width=True):
@@ -115,7 +128,8 @@ def logout():
     st.session_state.clear()
     st.success(logout_message)
     st.info("Redirecting to login page...")
-    st.rerun()
+    time.sleep(1)
+    st.switch_page("app.py")
 
 # Run dashboard
 show_dashboard()

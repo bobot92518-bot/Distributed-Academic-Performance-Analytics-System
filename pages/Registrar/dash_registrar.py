@@ -264,14 +264,5 @@ def show_registrar_dashboard():
         st.subheader("For Updates")
         st.write("No data")
 
-    if st.button("Logout"):
-        logout_message = f"Goodbye, {st.session_state.get('username', 'User')}! 👋"
-        st.session_state.clear()
-        st.success(logout_message)
-        st.info("Redirecting to login page...")
-        import time
-        time.sleep(3)
-        st.switch_page("app.py")
-
 if __name__ == "__main__":
     show_registrar_dashboard()
