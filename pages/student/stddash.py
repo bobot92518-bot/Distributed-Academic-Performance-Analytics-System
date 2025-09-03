@@ -1,11 +1,18 @@
 import streamlit as st
 import pandas as pd
 import os
-
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+import io
+import matplotlib.pyplot as plt
+from reportlab.platypus import Image
 # ------------------ Paths to Pickle Files ------------------ #
 student_cache = "pkl/students.pkl"
 grades_cache = "pkl/grades.pkl"
 semesters_cache = "pkl/semesters.pkl"
+subjects_cache = "pkl/subjects.pkl"
 
 # ------------------ Helper Functions ------------------ #
 def get_student_info(username):
@@ -71,16 +78,17 @@ def _expand_subject_rows(grades_records):
         exp = pd.DataFrame({
             "SubjectCode": df["SubjectCodes"].explode().values,
             "Teacher": df["Teachers"].explode().values,
+            "Description": df["Description"].explode().values,
             "Grade": df["Grades"].explode().values,
             "SemesterID": df["SemesterID"].explode().values if df["SemesterID"].apply(lambda x: isinstance(x, list)).any() else df["SemesterID"].values,
             "SemesterLabel": df["SemesterLabel"].explode().values if df["SemesterLabel"].apply(lambda x: isinstance(x, list)).any() else df["SemesterLabel"].values,
         })
     else:
         exp = df.rename(columns={
-            "SubjectCodes": "SubjectCode",
+            "SubjectCodes": "SubjectCodes",
             "Teachers": "Teacher",
             "Grades": "Grade",
-        })[["SubjectCode", "Teacher", "Grade", "SemesterID", "SemesterLabel"]]
+        })[["SubjectCodes", "Teacher", "Grade", "SemesterID", "SemesterLabel"]]
 
     # Coerce numeric grades
     exp["NumericGrade"] = pd.to_numeric(exp["Grade"], errors="coerce")
@@ -100,7 +108,15 @@ def _compute_student_trend(grades_records):
            .rename(columns={"NumericGrade": "StudentAverage"})
     )
     return trend
+def get_subjects():
+    """Fetch subjects (with descriptions) from pickle."""
+    if not os.path.exists(subjects_cache):
+        st.error("Subjects cache file not found.")
+        st.stop()
 
+    subjects = pd.read_pickle(subjects_cache)
+    subjects_df = pd.DataFrame(subjects) if isinstance(subjects, list) else subjects
+    return subjects_df[["_id", "Description"]].drop_duplicates()
 def _compute_class_trend():
     """Compute class average per semester across all students."""
     if not os.path.exists(grades_cache) or not os.path.exists(semesters_cache):
@@ -190,84 +206,10 @@ def _compute_subject_vs_class(grades_records):
     return out
 
 # ------------------ Self-Assessment: UI ------------------ #
-def show_self_assessment(grades_records):
-    st.markdown("### 🧭 Self-Assessment & Insights")
-
-    # Tabs for the four requested views
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Performance Trend Over Time",
-        "Subject Difficulty Ratings",
-        "Comparison with Class Average",
-        "Passed vs Failed Summary",
-    ])
-
-    # 1) Performance Trend Over Time
-    with tab1:
-        trend_student = _compute_student_trend(grades_records)
-        trend_class = _compute_class_trend()
-
-        if trend_student.empty:
-            st.info("No data available to plot GPA trend.")
-        else:
-            df_plot = trend_student.copy()
-            if not trend_class.empty:
-                df_plot = pd.merge(
-                    df_plot,
-                    trend_class[["SemesterID", "ClassAverage"]],
-                    on="SemesterID",
-                    how="left",
-                )
-            df_plot = df_plot.sort_values("SemesterID")
-            df_plot = df_plot.set_index("SemesterLabel")[["StudentAverage"] + (["ClassAverage"] if "ClassAverage" in df_plot.columns else [])]
-            st.line_chart(df_plot, use_container_width=True)
-
-    # 2) Subject Difficulty Ratings (session-level storage)
-    with tab2:
-        exp = _expand_subject_rows(grades_records)
-        if exp.empty:
-            st.info("No subjects to rate.")
-        else:
-            st.caption("Rate perceived difficulty per subject (1 = easiest, 5 = hardest). Saved for this session.")
-            if "subject_difficulty" not in st.session_state:
-                st.session_state["subject_difficulty"] = {}
-            difficulties = st.session_state["subject_difficulty"]
-
-            unique_subjects = sorted(exp["SubjectCode"].dropna().astype(str).unique())
-            cols = st.columns(2)
-            updated = False
-            for i, subj in enumerate(unique_subjects):
-                with cols[i % 2]:
-                    current = difficulties.get(subj, 3)
-                    rating = st.slider(f"{subj}", min_value=1, max_value=5, value=int(current), key=f"rate_{subj}")
-                    if rating != current:
-                        difficulties[subj] = rating
-                        updated = True
-            if updated:
-                st.session_state["subject_difficulty"] = difficulties
-            if difficulties:
-                disp = pd.DataFrame({"Subject": list(difficulties.keys()), "Difficulty": list(difficulties.values())}).set_index("Subject")
-                st.bar_chart(disp, use_container_width=True)
-
-    # 3) Comparison with Class Average
-    with tab3:
-        comp = _compute_subject_vs_class(grades_records)
-        if comp.empty:
-            st.info("No data available for comparison.")
-        else:
-            comp = comp.set_index("SubjectCode")
-            st.bar_chart(comp, use_container_width=True)
-
-    # 4) Passed vs Failed Summary
-    with tab4:
-        summary = _compute_pass_fail_summary(grades_records)
-        if summary.sum() == 0:
-            st.info("No summary available.")
-        else:
-            st.bar_chart(summary)
 
 # ------------------ Main Dashboard Function ------------------ #
 def show_student_dashboard():
-    st.write("Here you can view your grades, assignments, and academic progress.")
+    
     if 'authenticated' not in st.session_state or not st.session_state.authenticated or st.session_state.role != "student":
         st.error("Unauthorized access. Please login as Student.")
         st.stop()
@@ -281,61 +223,397 @@ def show_student_dashboard():
 
     grades = get_student_grades(student["_id"])
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Current GPA", student.get("GPA", "N/A"))
-    with col2:
-        st.metric("Course", student.get("Course", "N/A"))
-
-    st.markdown("### 📝 Academic Transcript")
-
     if grades:
-        df = pd.DataFrame(grades)
-        df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+        st.markdown("### 🧭 Self-Assessment & Insights")
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Performance Trend Over Time",
+            "Subject Difficulty Ratings",
+            "Comparison with Class Average",
+            "Passed vs Failed Summary",
+        ])
 
-        if "Semester" in df.columns and "SchoolYear" in df.columns:
-            grouped = df.groupby(["SchoolYear", "Semester"])
-            for (sy, sem), sem_df in grouped:
-                st.subheader(f"{sy} - Semester {sem}")
+        # 📌 Tab 1 = Transcript table + Trend chart
+        with tab1:
+            col1, col2 = st.columns(2)
 
-                if (
-                    "SubjectCodes" in sem_df
-                    and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any()
-                ):
-                    expanded_df = pd.DataFrame({
-                        "SubjectCode": sem_df["SubjectCodes"].explode().values,
-                        "Teacher": sem_df["Teachers"].explode().values,
-                        "Grade": sem_df["Grades"].explode().values
-                    })
-                else:
-                    expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
-                        columns={
-                            "SubjectCodes": "SubjectCode",
-                            "Teachers": "Teacher",
-                            "Grades": "Grade"
-                        }
+            # --- Prepare DataFrame ---
+            df = pd.DataFrame(grades)
+            df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+
+            transcript_data = {}
+            semester_avgs = []  # store semester averages for plotting
+
+            if "Semester" in df.columns and "SchoolYear" in df.columns:
+                grouped = df.groupby(["SchoolYear", "Semester"])
+                subjects_df = get_subjects()
+
+                for (sy, sem), sem_df in grouped:
+                    if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                        expanded_df = pd.DataFrame({
+                            "SubjectCodes": sem_df["SubjectCodes"].explode().values,
+                            "Teacher": sem_df["Teachers"].explode().values,
+                            "Grade": sem_df["Grades"].explode().values
+                        })
+                    else:
+                        expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
+                            columns={"Teachers": "Teacher", "Grades": "Grade"}
+                        )
+
+                    expanded_df = expanded_df.merge(
+                        subjects_df.rename(columns={"_id": "SubjectCodes"}),
+                        on="SubjectCodes",
+                        how="left"
                     )
 
-                st.dataframe(expanded_df, use_container_width=True)
+                    if "Description" not in expanded_df.columns:
+                        expanded_df["Description"] = "N/A"
 
-                if "Grade" in expanded_df.columns:
+                    expanded_df = expanded_df[["SubjectCodes", "Description", "Teacher", "Grade"]]
+
+                    transcript_data[f"{sy} - Semester {sem}"] = expanded_df
+
                     valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
                     if not valid_grades.empty:
                         avg = valid_grades.mean()
-                        st.write(f"**Semester Average: {avg:.2f}**")
-                    else:
-                        st.write("**Semester Average: N/A**")
+                        semester_avgs.append((f"{sy} - Sem {sem}", avg))
+
+            # ✅ Show Total Average ABOVE
+            with col1:
+                if semester_avgs:
+                    total_avg = sum(avg for _, avg in semester_avgs) / len(semester_avgs)
+                    st.metric("Total Average", f"{total_avg:.2f}")
+                else:
+                    total_avg = None
+                    st.metric("Total Average", "N/A")
+
+            with col2:
+                st.metric("Course", student.get("Course", "N/A"))
+
+            # --- Now show transcript tables ---
+            for sem_title, expanded_df in transcript_data.items():
+                st.subheader(sem_title)
+                st.dataframe(expanded_df, use_container_width=True)
+
+                valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
+                if not valid_grades.empty:
+                    avg = valid_grades.mean()
+                    st.write(f"**Semester Average: {avg:.2f}**")
+                else:
+                    st.write("**Semester Average: N/A**")
 
                 st.markdown("---")
-        else:
-            st.warning("Missing 'Semester' or 'SchoolYear' fields.")
-            st.dataframe(df, use_container_width=True)
+
+            # ✅ Line Graph after tables
+            if semester_avgs:
+                labels, values = zip(*semester_avgs)
+                labels = list(labels)
+                values = list(values)
+
+                # ✅ Add final average as extra point on X-axis
+                if total_avg is not None:
+                    labels.append("Final Average")
+                    values.append(total_avg)
+
+                plt.figure(figsize=(12, 5))
+                plt.plot(labels, values, marker="o", linestyle="-", label="Semester Average + Final")
+
+                plt.ylim(1, 100)
+                plt.xlabel("Semester (SchoolYear - Sem)")
+                plt.ylabel("Average Grade")
+                plt.title("Average Grades per Semester")
+                plt.grid(True)
+                plt.xticks(rotation=45, ha="right")
+                plt.legend()
+                plt.tight_layout()
+
+                st.pyplot(plt)
+
+                    # ---------------- PDF Export ---------------- #
+    # ---------------- PDF Export ---------------- #
+        if transcript_data:
+            if st.button("📄 Generate Report"):
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=A4)
+                elements = []
+                styles = getSampleStyleSheet()
+
+                # Title
+                title = Paragraph("Academic Transcript Report", styles["Title"])
+                elements.append(title)
+                elements.append(Spacer(1, 12))
+                total_avg = sum(avg for _, avg in semester_avgs) / len(semester_avgs)
+                    
+                # Student Info
+                full_name = f"{student.get('Name', '')}"
+                elements.append(Paragraph(f"<b>Student Name:</b> {full_name}", styles["Normal"]))
+                elements.append(Paragraph(f"<b>Course:</b> {student.get('Course', 'N/A')}", styles["Normal"]))
+                elements.append(Paragraph(f"<b>Total Average:</b> {total_avg:.2f}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+
+                # Calculate fixed column widths
+                page_width = A4[0] - doc.leftMargin - doc.rightMargin
+                col_count = 4  # ["SubjectCodes", "Description", "Teacher", "Grade"]
+                col_widths = [page_width / col_count] * col_count
+
+                all_grades = []
+                semester_avgs_pdf = []  # store averages for plotting
+
+                for sem_title, sem_df in transcript_data.items():
+                    elements.append(Paragraph(sem_title, styles["Heading2"]))
+
+                    numeric_grades = pd.to_numeric(sem_df["Grade"], errors="coerce").dropna().tolist()
+                    all_grades.extend(numeric_grades)
+
+                    # Table
+                    table_data = [sem_df.columns.tolist()] + sem_df.values.tolist()
+                    table = Table(table_data, colWidths=col_widths, repeatRows=1)
+                    table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("FONTSIZE", (0, 0), (-1, -1), 6),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                        ("TOPPADDING", (0, 0), (-1, -1), 3),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                        ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
+                    ]))
+                    elements.append(table)
+
+                    # Semester Average
+                    if numeric_grades:
+                        avg = sum(numeric_grades) / len(numeric_grades)
+                        semester_avgs_pdf.append((sem_title, avg))
+                        elements.append(Spacer(1, 6))
+                        elements.append(Paragraph(f"<b>Semester Average: {avg:.2f}</b>", styles["Normal"]))
+                    else:
+                        elements.append(Paragraph("<b>Semester Average: N/A</b>", styles["Normal"]))
+
+                    elements.append(Spacer(1, 12))
+
+                # Overall Average
+                total_avg = None
+                if all_grades:
+                    total_avg = sum(all_grades) / len(all_grades)
+                    elements.append(Paragraph(f"<b>Overall Average: {total_avg:.2f}</b>", styles["Heading2"]))
+
+               # ✅ Add line graph for semester averages
+                if semester_avgs:
+                    labels, values = zip(*semester_avgs)
+                    labels = list(labels)
+                    values = list(values)
+
+                    plt.figure(figsize=(8, 4))
+                    plt.plot(labels, values, marker="o", linestyle="-", label="Semester Average")
+
+                    # annotate semester averages
+                    for i, (x, y) in enumerate(zip(labels, values)):
+                        plt.text(i, y + 1, f"{y:.2f}", ha="center", fontsize=7, color="blue")
+
+                    # ✅ Add Final Average as red dot at the end
+                    if total_avg is not None:
+                        labels.append("Final Avg")
+                        values.append(total_avg)
+                        plt.plot(len(labels) - 1, total_avg, marker="o", color="red", markersize=8, label="Final Avg")
+                        plt.text(len(labels) - 1, total_avg + 1, f"{total_avg:.2f}", ha="center", fontsize=8, color="red")
+
+                    plt.ylim(1, 100)
+                    plt.xlabel("Semester (SchoolYear - Sem)")
+                    plt.ylabel("Average Grade")
+                    plt.title("Average Grades per Semester")
+                    plt.xticks(range(len(labels)), labels, rotation=45, ha="right")
+                    plt.grid(True)
+                    plt.legend()
+                    plt.tight_layout()
+
+                    img_buffer = io.BytesIO()
+                    plt.savefig(img_buffer, format="PNG")
+                    plt.close()
+                    img_buffer.seek(0)
+
+                    reportlab_img = Image(img_buffer, width=400, height=200)
+                    elements.append(Spacer(1, 12))
+                    elements.append(Paragraph("Performance Trend", styles["Heading2"]))
+                    elements.append(reportlab_img)
+
+                    # 🔽 Summary section
+                    if total_avg is not None:
+                        elements.append(Spacer(1, 12))
+                        elements.append(Paragraph(
+                            f"<b>Conclusion:</b> The student achieved an overall average of "
+                            f"<b>{total_avg:.2f}</b> across all semesters.",
+                            styles["Normal"]
+                        ))
+                
+
+                # Build PDF
+                doc.build(elements)
+                buffer.seek(0)
+
+                st.download_button(
+                    label="⬇️ Download PDF",
+                    data=buffer,
+                    file_name="transcript_report.pdf",
+                    mime="application/pdf"
+                )
+
+
+
+                # Other tabs (difficulty, comparison, summary)
+        with tab2:
+            df = pd.DataFrame(grades)
+            df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+
+            if "Semester" in df.columns and "SchoolYear" in df.columns:
+                grouped = df.groupby(["SchoolYear", "Semester"])
+                subjects_df = get_subjects()
+
+                for (sy, sem), sem_df in grouped:
+                    st.subheader(f"{sy} - Semester {sem}")
+
+                    if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                        expanded_df = pd.DataFrame({
+                            "SubjectCodes": sem_df["SubjectCodes"].explode().values,
+                            "Teacher": sem_df["Teachers"].explode().values,
+                            "Grade": sem_df["Grades"].explode().values
+                        })
+                    else:
+                        expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
+                            columns={"Teachers": "Teacher", "Grades": "Grade"}
+                        )
+
+                    # Merge with subjects_df
+                    expanded_df = expanded_df.merge(
+                        subjects_df.rename(columns={"_id": "SubjectCodes"}),
+                        on="SubjectCodes",
+                        how="left"
+                    )
+
+                    # ✅ Ensure Description always exists
+                    if "Description" not in expanded_df.columns:
+                        expanded_df["Description"] = "N/A"
+
+                    # Reorder columns safely
+                    columns_to_show = ["SubjectCodes", "Description", "Teacher", "Grade"]
+                    expanded_df = expanded_df[[c for c in columns_to_show if c in expanded_df.columns]]
+
+                    st.dataframe(expanded_df, use_container_width=True)
+
+                    if "Grade" in expanded_df.columns:
+                        valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
+                        if not valid_grades.empty:
+                            avg = valid_grades.mean()
+                            st.write(f"**Semester Average: {avg:.2f}**")
+                        else:
+                            st.write("**Semester Average: N/A**")
+
+                    st.markdown("---")
+
+
+        with tab3:
+            df = pd.DataFrame(grades)
+            df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+
+            if "Semester" in df.columns and "SchoolYear" in df.columns:
+                grouped = df.groupby(["SchoolYear", "Semester"])
+                subjects_df = get_subjects()
+
+                for (sy, sem), sem_df in grouped:
+                    st.subheader(f"{sy} - Semester {sem}")
+
+                    if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                        expanded_df = pd.DataFrame({
+                            "SubjectCodes": sem_df["SubjectCodes"].explode().values,
+                            "Teacher": sem_df["Teachers"].explode().values,
+                            "Grade": sem_df["Grades"].explode().values
+                        })
+                    else:
+                        expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
+                            columns={"Teachers": "Teacher", "Grades": "Grade"}
+                        )
+
+                    # Merge with subjects_df
+                    expanded_df = expanded_df.merge(
+                        subjects_df.rename(columns={"_id": "SubjectCodes"}),
+                        on="SubjectCodes",
+                        how="left"
+                    )
+
+                    # ✅ Ensure Description always exists
+                    if "Description" not in expanded_df.columns:
+                        expanded_df["Description"] = "N/A"
+
+                    # Reorder columns safely
+                    columns_to_show = ["SubjectCodes", "Description", "Teacher", "Grade"]
+                    expanded_df = expanded_df[[c for c in columns_to_show if c in expanded_df.columns]]
+
+                    st.dataframe(expanded_df, use_container_width=True)
+
+                    if "Grade" in expanded_df.columns:
+                        valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
+                        if not valid_grades.empty:
+                            avg = valid_grades.mean()
+                            st.write(f"**Semester Average: {avg:.2f}**")
+                        else:
+                            st.write("**Semester Average: N/A**")
+
+                    st.markdown("---")
+
+
+        with tab4:
+            df = pd.DataFrame(grades)
+            df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+
+            if "Semester" in df.columns and "SchoolYear" in df.columns:
+                grouped = df.groupby(["SchoolYear", "Semester"])
+                subjects_df = get_subjects()
+
+                for (sy, sem), sem_df in grouped:
+                    st.subheader(f"{sy} - Semester {sem}")
+
+                    if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                        expanded_df = pd.DataFrame({
+                            "SubjectCodes": sem_df["SubjectCodes"].explode().values,
+                            "Teacher": sem_df["Teachers"].explode().values,
+                            "Grade": sem_df["Grades"].explode().values
+                        })
+                    else:
+                        expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
+                            columns={"Teachers": "Teacher", "Grades": "Grade"}
+                        )
+
+                    # Merge with subjects_df
+                    expanded_df = expanded_df.merge(
+                        subjects_df.rename(columns={"_id": "SubjectCodes"}),
+                        on="SubjectCodes",
+                        how="left"
+                    )
+
+                    # ✅ Ensure Description always exists
+                    if "Description" not in expanded_df.columns:
+                        expanded_df["Description"] = "N/A"
+
+                    # Reorder columns safely
+                    columns_to_show = ["SubjectCodes", "Description", "Teacher", "Grade"]
+                    expanded_df = expanded_df[[c for c in columns_to_show if c in expanded_df.columns]]
+
+                    st.dataframe(expanded_df, use_container_width=True)
+
+                    if "Grade" in expanded_df.columns:
+                        valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
+                        if not valid_grades.empty:
+                            avg = valid_grades.mean()
+                            st.write(f"**Semester Average: {avg:.2f}**")
+                        else:
+                            st.write("**Semester Average: N/A**")
+
+                    st.markdown("---")
+
+
     else:
         st.info("No grades found for this student.")
-
-    # Self-Assessment section (uses same grades)
-    if grades:
-        show_self_assessment(grades)
 
 # ------------------ Entry Point ------------------ #
 def main():
@@ -346,3 +624,4 @@ def main():
         initial_sidebar_state="expanded"
     )
     show_student_dashboard()
+ 
