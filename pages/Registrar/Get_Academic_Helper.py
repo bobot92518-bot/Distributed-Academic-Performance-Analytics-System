@@ -16,11 +16,12 @@ def get_academic_standing(filters):
     students_df = pd.DataFrame(load_pkl_data(students_cache))
     grades_df = pd.DataFrame(load_pkl_data(grades_cache))
     semesters_df = pd.DataFrame(load_pkl_data(semesters_cache))
+    subjects_df = pd.DataFrame(load_pkl_data(subjects_cache))
 
     if students_df.empty or grades_df.empty:
         return pd.DataFrame()
 
-    # Merge grades with students
+    # Merge grades with students to get course information
     merged = grades_df.merge(students_df, left_on="StudentID", right_on="_id", how="left")
 
     # Apply filters
@@ -34,12 +35,17 @@ def get_academic_standing(filters):
         if len(sem_id) > 0:
             merged = merged[merged["SemesterID"].isin(sem_id)]
 
+    # Filter by Course (from students collection)
+    if filters.get("Course") != "All" and not merged.empty:
+        merged = merged[merged["Course"] == filters["Course"]]
+
+
     # Calculate GPA
     merged["GPA"] = merged["Grades"].apply(lambda x: sum(x)/len(x) if isinstance(x, list) and x else 0)
 
     # Determine status
     merged["Status"] = merged["GPA"].apply(lambda g: "Good Standing" if g >= 75 else "Probation")
 
-    return merged[["Name", "GPA", "Status"]].drop_duplicates()
+    return merged[["Name", "Course", "GPA", "Status"]].drop_duplicates()
 
 
