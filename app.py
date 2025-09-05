@@ -65,8 +65,18 @@ def authenticate_user(username, password):
 
 def main():
     # Page config
-    st.set_page_config(page_title="DAPAS Login", layout="centered")
-
+    st.set_page_config(page_title="DAPAS Login",page_icon="🏫", layout="centered")
+    st.markdown(
+        """
+        <style>
+            .stMainBlockContainer {
+                margin: 20px;
+                padding: 0;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     # Hide sidebar completely
     st.markdown("""
         <style>
@@ -82,12 +92,12 @@ def main():
 
     # Title
     st.markdown(
-        "<h1 style='text-align: center; color: #4B8BBE;'>Welcome to DAPAS</h1>"
-        "<h3 style='text-align: center; color: #306998;'>Distributed Academic Performance Analytics System</h3>",
+        "<h2 style='padding:0; margin: 0; font-size:100px; text-align:center; margin:0;'>🏫</h2>"
+        "<h1 style='padding:0; margin: 0; text-align: center; color: #4B8BBE;'>Welcome to DAPAS</h1>"
+        "<h3 style='padding:0; margin: 0; text-align: center; color: #306998;'>Distributed Academic Performance Analytics System</h3>"
+        "<br>",
         unsafe_allow_html=True
     )
-
-    st.markdown("<br>", unsafe_allow_html=True)
 
     # Login form
     with st.form("login_form"):
