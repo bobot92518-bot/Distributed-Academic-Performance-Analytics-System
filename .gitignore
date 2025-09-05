@@ -25,3 +25,10 @@ env/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
