@@ -17,7 +17,7 @@ def load_pkl_data(cache_path):
         return pd.read_pickle(cache_path)
     else:
         print(f"⚠️ Cache file {cache_path} not found.")
-        return []
+        return pd.DataFrame()
 
 
 def export_to_excel(df, filename):
@@ -29,5 +29,10 @@ def export_to_pdf(df, filename):
     """Export DataFrame to PDF (placeholder)"""
     df.to_pdf(filename, index=False)
     print(f"PDF export not implemented. Data: {df.head()}")
+
+
+def pkl_data_to_df(cache_path):
+    pkl_data = load_pkl_data(cache_path)
+    return pd.DataFrame(pkl_data) if isinstance(pkl_data, list) else pkl_data
 
 
