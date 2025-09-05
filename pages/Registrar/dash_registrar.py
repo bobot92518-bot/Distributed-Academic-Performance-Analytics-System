@@ -27,6 +27,7 @@ def get_academic_standing(filters):
     students_df = pd.DataFrame(load_pkl_data(students_cache))
     grades_df = pd.DataFrame(load_pkl_data(grades_cache))
     semesters_df = pd.DataFrame(load_pkl_data(semesters_cache))
+    subjects_df = pd.DataFrame(load_pkl_data(subjects_cache))
 
     if students_df.empty or grades_df.empty:
         return pd.DataFrame()
@@ -36,14 +37,15 @@ def get_academic_standing(filters):
     print(f"📊 Available semesters: {semesters_df['Semester'].unique() if not semesters_df.empty else 'None'}")
     print(f"📊 Available school years: {semesters_df['SchoolYear'].unique() if not semesters_df.empty else 'None'}")
 
-    # Merge grades with students
+    # Merge grades with students to get course information
     merged = grades_df.merge(students_df, left_on="StudentID", right_on="_id", how="left")
 
     # Apply filters
     if filters.get("Semester") != "All":
-        sem_id = semesters_df[semesters_df["Semester"] == filters["Semester"]]["_id"].values
-        if len(sem_id) > 0:
-            merged = merged[merged["SemesterID"] == sem_id[0]]
+        sem_id_arr = semesters_df[semesters_df["Semester"] == filters["Semester"]]["_id"].values
+        if len(sem_id_arr) > 0:
+            sem_id_val = str(sem_id_arr[0])
+            merged = merged[merged["SemesterID"].astype(str) == sem_id_val]
 
     if filters.get("SchoolYear") != "All":
         # Debug: Print school year filtering info
@@ -53,44 +55,31 @@ def get_academic_standing(filters):
         try:
             school_year_value = int(filters["SchoolYear"]) if isinstance(filters["SchoolYear"], str) else filters["SchoolYear"]
             print(f"🔍 Converted school year value: {school_year_value}")
-            sem_ids_by_year = semesters_df[semesters_df["SchoolYear"] == school_year_value]["_id"].tolist()
+            sem_ids_by_year = semesters_df[semesters_df["SchoolYear"] == school_year_value]["_id"].astype(str).tolist()
             print(f"🔍 Found semester IDs for year {school_year_value}: {sem_ids_by_year}")
             if sem_ids_by_year:
-                merged = merged[merged["SemesterID"].isin(sem_ids_by_year)]
+                merged = merged[merged["SemesterID"].astype(str).isin(sem_ids_by_year)]
                 print(f"📊 Records after school year filtering: {len(merged)}")
             else:
                 print(f"⚠️ No semesters found for school year {school_year_value}")
         except (ValueError, TypeError) as e:
             print(f"⚠️ Error converting school year: {e}")
             # If conversion fails, try string comparison
-            sem_ids_by_year = semesters_df[semesters_df["SchoolYear"].astype(str) == str(filters["SchoolYear"])]["_id"].tolist()
+            sem_ids_by_year = semesters_df[semesters_df["SchoolYear"].astype(str) == str(filters["SchoolYear"])]["_id"].astype(str).tolist()
             print(f"🔍 Found semester IDs (string comparison): {sem_ids_by_year}")
             if sem_ids_by_year:
-                merged = merged[merged["SemesterID"].isin(sem_ids_by_year)]
+                merged = merged[merged["SemesterID"].astype(str).isin(sem_ids_by_year)]
                 print(f"📊 Records after school year filtering (string): {len(merged)}")
             else:
                 print(f"⚠️ No semesters found for school year {filters['SchoolYear']} (string comparison)")
 
-    # Filter by subject
-    if filters.get("Subject") != "All" and not merged.empty:
-        subjects_df = pd.DataFrame(load_pkl_data(subjects_cache))
-        if not subjects_df.empty:
-            # Debug: Print subject filtering info
-            print(f"🔍 Subject filter: {filters['Subject']}")
-            print(f"📊 Available subjects: {subjects_df['Description'].unique() if not subjects_df.empty else 'None'}")
-            
-            # Get subject _id for the selected subject
-            subject_filter = subjects_df[subjects_df["Description"] == filters["Subject"]]
-            if not subject_filter.empty:
-                subject_id = subject_filter["_id"].iloc[0]
-                print(f"🔍 Found subject_id: {subject_id}")
-                # Filter grades by subject _id - handle both list and single value cases
-                merged = merged[merged["SubjectCodes"].apply(lambda x: 
-                    subject_id in x if isinstance(x, list) else subject_id == x
-                )]
-                print(f"📊 Records after subject filtering: {len(merged)}")
-            else:
-                print(f"⚠️ Subject '{filters['Subject']}' not found in subjects_df")
+    # Filter by Course (from students collection)
+    if filters.get("Course") != "All" and not merged.empty:
+        print(f"🔍 Course filter: {filters['Course']}")
+        print(f"📊 Available courses: {students_df['Course'].unique() if not students_df.empty else 'None'}")
+        merged = merged[merged["Course"] == filters["Course"]]
+        print(f"📊 Records after course filtering: {len(merged)}")
+
 
     # Calculate GPA
     merged["GPA"] = merged["Grades"].apply(lambda x: sum(x)/len(x) if isinstance(x, list) and x else 0)
@@ -112,7 +101,6 @@ def get_academic_standing(filters):
         merged["SchoolYear"] = merged["SemesterID"].map(years_dict)
         
         # Add subject information
-        subjects_df = pd.DataFrame(load_pkl_data(subjects_cache))
         if not subjects_df.empty:
             # Create subject mapping dictionary
             subjects_dict = dict(zip(subjects_df["_id"], subjects_df["Description"]))
@@ -141,7 +129,7 @@ def get_academic_standing(filters):
     merged["Status"] = merged["GPA"].apply(_academic_status)
 
     # Ensure all required columns exist before returning
-    required_columns = ["Name", "GPA", "TotalUnits", "Status", "Semester", "SchoolYear", "Subject"]
+    required_columns = ["Name", "Course", "GPA", "TotalUnits", "Status", "Semester", "SchoolYear", "Subject"]
     for col in required_columns:
         if col not in merged.columns:
             merged[col] = ""
@@ -216,20 +204,33 @@ def show_registrar_dashboard():
         st.subheader("Academic Standing")
         col1, col2, col3 = st.columns(3)
         with col1:
-            semester_options = ["All"] + list(semesters_df["Semester"].unique()) if not semesters_df.empty else ["All"]
-            semester = st.selectbox("Semester", semester_options, key="academic_semester")
-        with col2:
-            course_options = ["All"] + list(subjects_df["Description"].unique()) if not subjects_df.empty else ["All"]
+            course_options = ["All"] + list(students_df["Course"].unique()) if not students_df.empty else ["All"]
             course = st.selectbox("Course", course_options, key="academic_course")
-        with col3:
+        with col2:
             year_options = ["All"] + list(semesters_df["SchoolYear"].unique()) if not semesters_df.empty else ["All"]
-            year = st.selectbox("Year Level", year_options, key="academic_year")
+            year = st.selectbox("School Year", year_options, key="academic_year")
+        with col3:
+            if year != "All" and not semesters_df.empty:
+                sems_by_year = semesters_df[semesters_df["SchoolYear"] == year]["Semester"].unique().tolist()
+                semester_options = ["All"] + sems_by_year
+            else:
+                semester_options = ["All"] + (list(semesters_df["Semester"].unique()) if not semesters_df.empty else [])
+            semester = st.selectbox("Semester", semester_options, key="academic_semester")
 
         if st.button("Apply Filters", key="academic_apply"):
             with st.spinner("Loading academic standing data..."):
-                df = get_academic_standing({"Semester": semester, "Subject": course, "SchoolYear": year})
+                df = get_academic_standing({"Semester": semester, "Course": course, "SchoolYear": year})
                 if not df.empty:
                     st.dataframe(df)
+
+                    # Top 15 students (per current filters)
+                    st.subheader("Top 15 Students (by GPA)")
+                    top15_source = df[["Name", "Course", "GPA", "Semester", "SchoolYear"]].copy()
+                    # Aggregate in case multiple rows per student remain after filtering
+                    top15_agg = (top15_source
+                        .groupby(["Name", "Course", "Semester", "SchoolYear"], as_index=False)["GPA"].mean())
+                    top15 = top15_agg.sort_values(by="GPA", ascending=False).head(15)
+                    st.dataframe(top15)
                     
                     # Create subplots for different views
                     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -260,19 +261,23 @@ def show_registrar_dashboard():
         # Add filters similar to Academic Standing tab
         col1, col2, col3 = st.columns(3)
         with col1:
-            semester_options = ["All"] + list(semesters_df["Semester"].unique()) if not semesters_df.empty else ["All"]
-            semester = st.selectbox("Semester", semester_options, key="passfail_semester")
+            course_options = ["All"] + list(students_df["Course"].unique()) if not students_df.empty else ["All"]
+            course = st.selectbox("Course", course_options, key="passfail_course")
         with col2:
-            course_options = ["All"] + list(subjects_df["Description"].unique()) if not subjects_df.empty else ["All"]
-            course = st.selectbox("Subject", course_options, key="passfail_course")
-        with col3:
             year_options = ["All"] + list(semesters_df["SchoolYear"].unique()) if not semesters_df.empty else ["All"]
             year = st.selectbox("School Year", year_options, key="passfail_year")
+        with col3:
+            if year != "All" and not semesters_df.empty:
+                sems_by_year = semesters_df[semesters_df["SchoolYear"] == year]["Semester"].unique().tolist()
+                semester_options = ["All"] + sems_by_year
+            else:
+                semester_options = ["All"] + (list(semesters_df["Semester"].unique()) if not semesters_df.empty else [])
+            semester = st.selectbox("Semester", semester_options, key="passfail_semester")
         
         if st.button("Apply", key="passfail_apply"):
             with st.spinner("Loading pass/fail distribution data..."):
                 # Use the same filtering approach as Academic Standing
-                filters = {"Semester": semester, "Subject": course, "SchoolYear": year}
+                filters = {"Semester": semester, "Course": course, "SchoolYear": year}
                 df = get_academic_standing(filters)
                 
                 if not df.empty:
@@ -284,7 +289,7 @@ def show_registrar_dashboard():
                     
                     # Display filtered data table
                     st.subheader("Filtered Pass/Fail Data")
-                    display_columns = ["Name", "Subject", "GPA", "Result", "Semester", "SchoolYear"]
+                    display_columns = ["Name", "Course", "Subject", "GPA", "Result", "Semester", "SchoolYear"]
                     st.dataframe(df[display_columns])
                     
                     # Display summary table
@@ -296,7 +301,7 @@ def show_registrar_dashboard():
                     
                     # Stacked bar chart (by subject)
                     summary.plot(kind="bar", stacked=True, ax=ax1, color=["green", "red"])
-                    ax1.set_title(f"Pass/Fail Distribution by Subject\n(Semester: {semester}, Year: {year}, Subject: {course})")
+                    ax1.set_title(f"Pass/Fail Distribution by Subject\n(Semester: {semester}, Year: {year}, Course: {course})")
                     ax1.set_xlabel("Subjects")
                     ax1.set_ylabel("Number of Students")
                     ax1.legend()
@@ -304,7 +309,7 @@ def show_registrar_dashboard():
                     
                     # Heatmap for better visualization of large datasets
                     ax2.imshow(summary.T, cmap='RdYlGn', aspect='auto')
-                    ax2.set_title(f"Pass/Fail Heatmap\n(Semester: {semester}, Year: {year}, Subject: {course})")
+                    ax2.set_title(f"Pass/Fail Heatmap\n(Semester: {semester}, Year: {year}, Course: {course})")
                     ax2.set_xlabel("Subjects")
                     ax2.set_ylabel("Result")
                     ax2.set_yticks(range(len(summary.columns)))
