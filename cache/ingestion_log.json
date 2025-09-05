@@ -1,0 +1,11 @@
+{
+  "timestamp": 1757090517.3835049,
+  "load_time_seconds": 0.5551702976226807,
+  "records_loaded": {
+    "students": 500000,
+    "grades": 10000,
+    "semesters": 15,
+    "subjects": 120,
+    "teachers": 112
+  }
+}
