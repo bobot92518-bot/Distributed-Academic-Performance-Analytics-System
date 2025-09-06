@@ -611,11 +611,12 @@ def show_student_dashboard():
                 columns_to_show = [
                     "subjectCode",
                     "subjectName",
+                    "Grade",
                     "lec",
                     "lab",
                     "units",
-                    "prerequisite",
-                    "Grade"
+                    "prerequisite"
+                    
                 ]
                 group = group[[c for c in columns_to_show if c in group.columns]]
 
