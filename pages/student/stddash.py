@@ -246,7 +246,11 @@ def show_student_dashboard():
 
             if "Semester" in df.columns and "SchoolYear" in df.columns:
                 grouped = df.groupby(["SchoolYear", "Semester"])
-                subjects_df = get_subjects()
+                
+                # 🔑 Load subjects with Description + Units
+                subjects_df = pd.read_pickle(subjects_cache)
+                subjects_df = pd.DataFrame(subjects_df) if isinstance(subjects_df, list) else subjects_df
+                subjects_df = subjects_df[["_id", "Description", "Units"]].drop_duplicates()
 
                 for (sy, sem), sem_df in grouped:
                     if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
@@ -266,10 +270,14 @@ def show_student_dashboard():
                         how="left"
                     )
 
+                    # ✅ Ensure Description and Units always exist
                     if "Description" not in expanded_df.columns:
                         expanded_df["Description"] = "N/A"
+                    if "Units" not in expanded_df.columns:
+                        expanded_df["Units"] = "N/A"
 
-                    expanded_df = expanded_df[["SubjectCodes", "Description", "Teacher", "Grade"]]
+                    # ✅ Reorder with Units
+                    expanded_df = expanded_df[["SubjectCodes", "Units", "Description", "Teacher", "Grade"]]
 
                     transcript_data[f"{sy} - Semester {sem}"] = expanded_df
 
@@ -277,6 +285,7 @@ def show_student_dashboard():
                     if not valid_grades.empty:
                         avg = valid_grades.mean()
                         semester_avgs.append((f"{sy} - Sem {sem}", avg))
+
 
             # ✅ Show Total Average ABOVE
             with col1:
@@ -295,12 +304,20 @@ def show_student_dashboard():
                 st.subheader(sem_title)
                 st.dataframe(expanded_df, use_container_width=True)
 
+                # ✅ Semester Average
                 valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
                 if not valid_grades.empty:
                     avg = valid_grades.mean()
                     st.write(f"**Semester Average: {avg:.2f}**")
                 else:
                     st.write("**Semester Average: N/A**")
+
+                # ✅ Semester Total Units
+                if "Units" in expanded_df.columns:
+                    total_units = pd.to_numeric(expanded_df["Units"], errors="coerce").fillna(0).sum()
+                    st.write(f"**Total Units: {int(total_units)}**")
+                else:
+                    st.write("**Total Units: N/A**")
 
                 st.markdown("---")
 
@@ -558,87 +575,88 @@ def show_student_dashboard():
 
                 i += 1
         with tab5:
-           st.subheader("📘 Curriculum with Grades")
+            st.subheader("📘 Curriculum with Grades")
 
-        try:
-        # Load curriculum
-            curriculums = pd.read_pickle("pkl/curriculums.pkl")
-            if isinstance(curriculums, pd.DataFrame):
-                curriculums = curriculums.to_dict(orient="records")
+            try:
+                # Load curriculum
+                curriculums = pd.read_pickle("pkl/curriculums.pkl")
+                if isinstance(curriculums, pd.DataFrame):
+                    curriculums = curriculums.to_dict(orient="records")
 
-            # Load grades
-            df = pd.DataFrame(grades)
-            df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+                # Load grades
+                df = pd.DataFrame(grades)
+                df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
 
-            # Expand grades if subject codes are lists
-            if "SubjectCodes" in df.columns and df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
-                expanded_grades = pd.DataFrame({
-                    "subjectCode": df["SubjectCodes"].explode().values,   # 🔑 match column name with curriculum
-                    "Grade": df["Grades"].explode().values
-                })
-            else:
-                expanded_grades = df[["SubjectCodes", "Grades"]].rename(
-                    columns={"SubjectCodes": "subjectCode", "Grades": "Grade"}  # 🔑 align with curriculum "subjectCode"
-                )
-
-            for curriculum in curriculums:
-                st.markdown(f"""
-                ## 🎓 {curriculum.get('courseName', 'N/A')}
-                **Course Code:** {curriculum.get('courseCode', 'N/A')}  
-                **Curriculum Year:** {curriculum.get('curriculumYear', 'N/A')}  
-                """)
-
-                subjects = curriculum.get("subjects", [])
-                if not subjects:
-                    st.info("No subjects found for this curriculum.")
-                    continue
-
-                # Convert curriculum subjects to DataFrame
-                subj_df = pd.DataFrame(subjects)
-
-                # ✅ Merge curriculum subjects with student grades by subjectCode
-                subj_df = subj_df.merge(
-                    expanded_grades,
-                    on="subjectCode",
-                    how="left"  # keep all curriculum subjects even if no grade exists
-                )
-
-                # Group by yearLevel & semester
-                grouped = subj_df.groupby(["yearLevel", "semester"])
-
-                for (year, sem), group in grouped:
-                    st.subheader(f"📚 Year {year} - Semester {sem}")
-
-                    # Reorder columns
-                    columns_to_show = [
-                        "subjectCode",
-                        "subjectName",
-                        "Grade",
-                        "lec",
-                        "lab",
-                        "units",
-                        "prerequisite"
-                    ]
-                    group = group[[c for c in columns_to_show if c in group.columns]]
-
-                    # ✅ Rename column headers
-                    group = group.rename(columns={
-                        "subjectCode": "Subject Code",
-                        "subjectName": "Subject Name",
-                        "lec": "Lec",
-                        "lab": "Lab",
-                        "units": "Units",
-                        "prerequisite": "Prerequisite",
-                        "Grade": "Grade"
+                # Expand grades if subject codes are lists
+                if "SubjectCodes" in df.columns and df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                    expanded_grades = pd.DataFrame({
+                        "subjectCode": df["SubjectCodes"].explode().values,   # 🔑 match column name with curriculum
+                        "Grade": df["Grades"].explode().values
                     })
+                else:
+                    expanded_grades = df[["SubjectCodes", "Grades"]].rename(
+                        columns={"SubjectCodes": "subjectCode", "Grades": "Grade"}  # 🔑 align with curriculum "subjectCode"
+                    )
 
-                    # Display as table
-                    st.dataframe(group, use_container_width=True)
+                for curriculum in curriculums:
+                    st.markdown(f"""
+                    ## 🎓 {curriculum.get('courseName', 'N/A')}
+                    **Course Code:** {curriculum.get('courseCode', 'N/A')}  
+                    **Curriculum Year:** {curriculum.get('curriculumYear', 'N/A')}  
+                    """)
 
-                st.markdown("---")
+                    subjects = curriculum.get("subjects", [])
+                    if not subjects:
+                        st.info("No subjects found for this curriculum.")
+                        continue
 
-        except Exception as e:
-            st.error(f"Error loading curriculum data: {e}")
+                    # Convert curriculum subjects to DataFrame
+                    subj_df = pd.DataFrame(subjects)
+
+                    # ✅ Merge curriculum subjects with student grades by subjectCode
+                    subj_df = subj_df.merge(
+                        expanded_grades,
+                        on="subjectCode",
+                        how="left"  # keep all curriculum subjects even if no grade exists
+                    )
+
+                    # Group by yearLevel & semester
+                    grouped = subj_df.groupby(["yearLevel", "semester"])
+
+                    for (year, sem), group in grouped:
+                        st.subheader(f"📚 Year {year} - Semester {sem}")
+
+                        # Reorder columns
+                        columns_to_show = [
+                            "subjectCode",
+                            "subjectName",
+                            "Grade",
+                            "lec",
+                            "lab",
+                            "units",
+                            "prerequisite"
+                        ]
+                        group = group[[c for c in columns_to_show if c in group.columns]]
+
+                        # ✅ Rename column headers
+                        group = group.rename(columns={
+                            "subjectCode": "Subject Code",
+                            "subjectName": "Subject Name",
+                            "lec": "Lec",
+                            "lab": "Lab",
+                            "units": "Units",
+                            "prerequisite": "Prerequisite",
+                            "Grade": "Grade"
+                        })
+
+                        # Display as table
+                        st.dataframe(group, use_container_width=True)
+
+                    st.markdown("---")
+
+            except Exception as e:
+                st.error(f"Error loading curriculum data: {e}")
+           
 
 # ------------------ Entry Point ------------------ #
 def main():
