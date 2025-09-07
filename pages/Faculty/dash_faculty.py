@@ -14,8 +14,8 @@ from pages.Faculty.dash_faculty_tab6 import show_faculty_tab6_info
 current_faculty = user_data = st.session_state.get('user_data', {}).get('Teacher', '')
 
 
-def show_faculty_dashboard():
-    
+def show_faculty_dashboard_old():
+    """Original faculty dashboard implementation"""
     st.set_page_config(
         page_title="DAPAS - Faculty Dashboard",
         page_icon="🏫",
@@ -50,7 +50,58 @@ def show_faculty_dashboard():
     with tab6:
         st.subheader("🔍 Custom Query Builder")
         show_faculty_tab6_info()  
+
+def show_faculty_dashboard_new():
+    """Enhanced faculty dashboard implementation with simplified tabs"""
+    # Add version indicator
+    st.info("🆕 **New Version** - Enhanced faculty dashboard with improved features")
     
+    st.set_page_config(
+        page_title="DAPAS - Faculty Dashboard",
+        page_icon="🏫",
+        layout="wide"
+    )
+    
+    # Simplified tabs for new version
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Class List",
+        "👥 Evaluation Sheet", 
+        "📈 Curriculum Viewer",
+        "👨‍🏫 Teacher Analysis"
+    ])
+
+    with tab1:
+        st.subheader("📊 Class List")
+        st.markdown("This is Sample tab for New Version")
+        
+    with tab2:
+        st.subheader("👥 Evaluation Sheet")
+        st.markdown("This is Sample tab for New Version")
+        
+    with tab3:
+        st.subheader("📈 Curriculum Viewer")
+        st.markdown("This is Sample tab for New Version")
+      
+        
+    with tab4:
+        st.subheader("👨‍🏫 Teacher Analysis")
+        st.markdown("This is Sample tab for New Version")
+
+def show_faculty_dashboard():
+    """Main faculty dashboard function with toggle between old and new implementations"""
+    # Add toggle at the top left
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        use_new_version = st.toggle(
+            "🆕 Toggle Dashboard Version", 
+            value=True,  # Default to new version
+            help="Toggle between the original dashboard and the enhanced version with improved features"
+        ) 
+    # Call the appropriate version based on toggle
+    if use_new_version:
+        show_faculty_dashboard_new()
+    else:
+        show_faculty_dashboard_old()
 
 if __name__ == "__main__":
     show_faculty_dashboard()

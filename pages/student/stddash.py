@@ -15,15 +15,15 @@ semesters_cache = "pkl/semesters.pkl"
 subjects_cache = "pkl/subjects.pkl"
 
 # ------------------ Helper Functions ------------------ #
-def get_student_info(username):
-    """Fetch student info from pickle by username"""
+def get_student_info(student_name):
+    """Fetch student info from pickle by student name"""
     if not os.path.exists(student_cache):
         st.error("Student cache file not found.")
         st.stop()
 
     students = pd.read_pickle(student_cache)
     students_df = pd.DataFrame(students) if isinstance(students, list) else students
-    match = students_df[students_df["username"] == username]
+    match = students_df[students_df["Name"] == student_name]
     return match.iloc[0].to_dict() if not match.empty else None
 
 def get_student_grades(student_id):
@@ -208,14 +208,22 @@ def _compute_subject_vs_class(grades_records):
 # ------------------ Self-Assessment: UI ------------------ #
 
 # ------------------ Main Dashboard Function ------------------ #
-def show_student_dashboard():
+def show_student_dashboard_old():
+    """Original student dashboard implementation"""
     
     if 'authenticated' not in st.session_state or not st.session_state.authenticated or st.session_state.role != "student":
         st.error("Unauthorized access. Please login as Student.")
         st.stop()
 
-    username = st.session_state.username
-    student = get_student_info(username)
+    # Get student name from session state (using only Name field)
+    user_data = st.session_state.get("user_data", {})
+    student_name = user_data.get("Name", "")
+    
+    if not student_name:
+        st.error("Student name not found in session data.")
+        st.stop()
+    
+    student = get_student_info(student_name)
 
     if not student:
         st.error("Student record not found.")
@@ -494,8 +502,6 @@ def show_student_dashboard():
                             st.write("**Semester Average: N/A**")
 
                     st.markdown("---")
-
-
         with tab3:
             df = pd.DataFrame(grades)
             df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
@@ -544,8 +550,6 @@ def show_student_dashboard():
                             st.write("**Semester Average: N/A**")
 
                     st.markdown("---")
-
-
         with tab4:
            if "Semester" in df.columns and "SchoolYear" in df.columns:
             grouped = df.groupby(["SchoolYear", "Semester"])
@@ -607,6 +611,59 @@ def show_student_dashboard():
                 i += 1
 
 
+
+def show_student_dashboard_new():
+    """Enhanced faculty dashboard implementation with simplified tabs"""
+    # Add version indicator
+    st.info("🆕 **New Version** - Enhanced faculty dashboard with improved features")
+    
+    st.set_page_config(
+        page_title="DAPAS - Faculty Dashboard",
+        page_icon="🏫",
+        layout="wide"
+    )
+    
+    # Simplified tabs for new version
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Class List",
+        "👥 Evaluation Sheet", 
+        "📈 Curriculum Viewer",
+        "👨‍🏫 Teacher Analysis"
+    ])
+
+    with tab1:
+        st.subheader("📊 Class List")
+        st.markdown("This is Sample tab for New Version")
+        
+    with tab2:
+        st.subheader("👥 Evaluation Sheet")
+        st.markdown("This is Sample tab for New Version")
+        
+    with tab3:
+        st.subheader("📈 Curriculum Viewer")
+        st.markdown("This is Sample tab for New Version")
+      
+        
+    with tab4:
+        st.subheader("👨‍🏫 Teacher Analysis")
+        st.markdown("This is Sample tab for New Version")
+
+
+def show_student_dashboard():
+    """Main student dashboard function with toggle between old and new implementations"""
+    # Add toggle at the top left
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        use_new_version = st.toggle(
+            "🆕 Toggle Dashboard Version", 
+            value=True,  # Default to new version
+            help="Toggle between the original dashboard and the enhanced version with improved features"
+        ) 
+    # Call the appropriate version based on toggle
+    if use_new_version:
+        show_student_dashboard_new()
+    else:
+        show_student_dashboard_old()
 
 # ------------------ Entry Point ------------------ #
 def main():

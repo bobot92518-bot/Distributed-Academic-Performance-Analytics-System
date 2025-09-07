@@ -420,7 +420,8 @@ def export_to_pdf(df, filename):
     """Export DataFrame to PDF (placeholder)"""
     print(f"PDF export not implemented. Data: {df.head()}")
 
-def show_registrar_dashboard():
+def show_registrar_dashboard_old():
+    """Original dashboard implementation"""
     # st.markdown("# 📋 Registrar's Office Dashboard")
     # st.markdown("Comprehensive academic performance analytics and student management system")
     
@@ -434,20 +435,6 @@ def show_registrar_dashboard():
     subjects_df = data['subjects']
     teachers_df = data['teachers']
 
-    # Key Performance Indicators
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        total_students = len(students_df) if not students_df.empty else 0
-        st.metric("Total Students", f"{total_students:,}")
-    with col2:
-        total_grades = len(grades_df) if not grades_df.empty else 0
-        st.metric("Total Grade Records", f"{total_grades:,}")
-    with col3:
-        total_subjects = len(subjects_df) if not subjects_df.empty else 0
-        st.metric("Total Subjects", total_subjects)
-    with col4:
-        total_semesters = len(semesters_df) if not semesters_df.empty else 0
-        st.metric("Total Semesters", total_semesters)
 
     # Main Dashboard Tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -1044,6 +1031,94 @@ def show_registrar_dashboard():
                     st.warning("No top performers data available")
         else:
             st.info("👆 Click 'Load Top Performers' to view top performing students")
+
+def show_registrar_dashboard_new():
+    """Simplified dashboard implementation with 4 tabs only"""
+    
+    # Add version indicator
+    st.info("🆕 **New Version** - Simplified with 4 essential tabs")
+    
+    # Load all data with performance optimization
+    with st.spinner("Loading data..."):
+        data = load_all_data()
+    
+    students_df = data['students']
+    grades_df = data['grades']
+    semesters_df = data['semesters']
+    subjects_df = data['subjects']
+    teachers_df = data['teachers']
+
+    # Main Dashboard Tabs - Only 4 tabs
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "👥 Class List",          # People icon fits class roster
+        "📝 Evaluation Sheet",    # Clipboard/notes for evaluations
+        "📚 Curriculum Viewer",   # Books for curriculum
+        "👨‍🏫 Teacher Analysis"   # Teacher icon for analysis
+    ])
+
+    with tab1:
+        st.subheader("📊 Class List")
+        st.markdown("View class list per Teacher, Subject, and Semester with performance metrics")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            course_options = ["All"] + list(students_df["Course"].unique()) if not students_df.empty else ["All"]
+            course = st.selectbox("Course", course_options, key="academic_course_new")
+        with col2:
+            year_options = ["All"] + list(semesters_df["SchoolYear"].unique()) if not semesters_df.empty else ["All"]
+            year = st.selectbox("School Year", year_options, key="academic_year_new")
+        with col3:
+            if year != "All" and not semesters_df.empty:
+                sems_by_year = semesters_df[semesters_df["SchoolYear"] == year]["Semester"].unique().tolist()
+                semester_options = ["All"] + sems_by_year
+            else:
+                semester_options = ["All"] + (list(semesters_df["Semester"].unique()) if not semesters_df.empty else [])
+            semester = st.selectbox("Semester", semester_options, key="academic_semester_new")
+
+        if st.button("Apply Filters", key="academic_apply_new"):
+            with st.spinner("Loading academic standing data..."):
+                df = get_academic_standing(data, {"Semester": semester, "Course": course, "SchoolYear": year})
+                if not df.empty:
+                    # Display summary statistics
+                    # col1, col2, col3, col4 = st.columns(4)
+                    # with col1:
+                    #     st.metric("Total Students", len(df))
+                    # with col2:
+                    #     deans_list = len(df[df["Status"] == "Dean's List"])
+                    #     st.metric("Dean's List", deans_list)
+                    # with col3:
+                    #     good_standing = len(df[df["Status"] == "Good Standing"])
+                    #     st.metric("Good Standing", good_standing)
+                    # with col4:
+                    #     probation = len(df[df["Status"] == "Probation"])
+                    #     st.metric("Probation", probation)
+                    st.markdown("**Summary Statistics**")
+                    
+                    # Display data table
+                    # st.subheader("Academic Standing Data")
+                    # st.dataframe(df, use_container_width=True)
+                    
+                else:
+                    st.warning("No data available for the selected filters")
+        else:
+            st.info("👆 Click 'Apply Filters' to load academic standing data")
+
+def show_registrar_dashboard():
+    """Main dashboard function with toggle between old and new implementations"""
+    # Add toggle at the top left
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        use_new_version = st.toggle(
+            "🆕 Toggle Dashboard Version", 
+            value=True,  # Default to new version
+            help="Toggle between the original dashboard and the enhanced version with improved features"
+        ) 
+    # Call the appropriate version based on toggle
+    if use_new_version:
+        show_registrar_dashboard_new()
+    else:
+        show_registrar_dashboard_old()
 
 if __name__ == "__main__":
     show_registrar_dashboard()

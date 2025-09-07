@@ -2,64 +2,43 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from dbconnect import *
-from global_utils import students_cache, teachers_cache, registrar_cache
+from global_utils import user_accounts_cache
 import time
 import os # Make sure this returns a valid MongoDB client
 
 def authenticate_user(username, password):
     """Authenticate user and return user data with role"""
-    db = db_connect()
-
-    # STUDENT
-    if os.path.exists(students_cache):
-        students = pd.read_pickle(students_cache)
-        students_df = pd.DataFrame(students) if isinstance(students, list) else students
+    # Load user accounts from pickle file
+    if os.path.exists(user_accounts_cache):
+        user_accounts = pd.read_pickle(user_accounts_cache)
+        user_accounts_df = pd.DataFrame(user_accounts) if isinstance(user_accounts, list) else user_accounts
     else:
-        students = list(db["students"].find({}))
-        students_df = pd.DataFrame(students)
-        students_df.to_pickle(students_cache)
+        # If pickle file doesn't exist, fetch from database and create it
+        db = db_connect()
+        user_accounts = list(db["user_accounts"].find({}))
+        user_accounts_df = pd.DataFrame(user_accounts)
+        user_accounts_df.to_pickle(user_accounts_cache)
 
-    student = students_df[students_df["username"] == username]
-    if not student.empty and student.iloc[0]["Password"] == password:
-        return {
-            "user_data": student.iloc[0].to_dict(),
-            "role": "student",
-            "collection": "students"
+    # Find user by username
+    user = user_accounts_df[user_accounts_df["Username"] == username]
+    
+    if not user.empty and user.iloc[0]["Password"] == password:
+        user_data = user.iloc[0].to_dict()
+        user_type = user_data["UserType"].lower()
+        
+        # Map UserType to role and collection
+        role_mapping = {
+            "student": {"role": "student", "collection": "students"},
+            "faculty": {"role": "faculty", "collection": "teachers"},
+            "registrar": {"role": "registrar", "collection": "registrars"}
         }
-
-    # FACULTY
-    if os.path.exists(teachers_cache):
-        teachers = pd.read_pickle(teachers_cache)
-        teachers_df = pd.DataFrame(teachers) if isinstance(teachers, list) else teachers
-    else:
-        teachers = list(db["teachers"].find({}))
-        teachers_df = pd.DataFrame(teachers)
-        teachers_df.to_pickle(teachers_cache)
-
-    teacher = teachers_df[teachers_df["Username"] == username]
-    if not teacher.empty and teacher.iloc[0]["Password"] == password:
-        return {
-            "user_data": teacher.iloc[0].to_dict(),
-            "role": "faculty",
-            "collection": "teachers"
-        }
-
-    # REGISTRAR
-    if os.path.exists(registrar_cache):
-        registrars = pd.read_pickle(registrar_cache)
-        registrars_df = pd.DataFrame(registrars) if isinstance(registrars, list) else registrars
-    else:
-        registrars = list(db["registrars"].find({}))
-        registrars_df = pd.DataFrame(registrars)
-        registrars_df.to_pickle(registrar_cache)
-
-    registrar = registrars_df[registrars_df["Username"] == username]
-    if not registrar.empty and registrar.iloc[0]["Password"] == password:
-        return {
-            "user_data": registrar.iloc[0].to_dict(),
-            "role": "registrar",
-            "collection": "registrars"
-        }
+        
+        if user_type in role_mapping:
+            return {
+                "user_data": user_data,
+                "role": role_mapping[user_type]["role"],
+                "collection": role_mapping[user_type]["collection"]
+            }
 
     return None
 
