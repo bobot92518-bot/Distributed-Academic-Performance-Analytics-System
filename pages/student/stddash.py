@@ -520,7 +520,7 @@ def show_student_dashboard_old():
                             st.write("**Semester Average: N/A**")
 
                     st.markdown("---")
-<<<<<<< HEAD
+
         with tab3:
             df = pd.DataFrame(grades)
             df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
@@ -569,11 +569,7 @@ def show_student_dashboard_old():
                             st.write("**Semester Average: N/A**")
 
                     st.markdown("---")
-=======
-
-
-        
->>>>>>> 6ed7bdb03c5dd47930274e06ec33baa5bc980de7
+                    
         with tab4:
            if "Semester" in df.columns and "SchoolYear" in df.columns:
             grouped = df.groupby(["SchoolYear", "Semester"])
