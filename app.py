@@ -24,21 +24,7 @@ def authenticate_user(username, password):
     
     if not user.empty and user.iloc[0]["Password"] == password:
         user_data = user.iloc[0].to_dict()
-        user_type = user_data["UserType"].lower()
-        
-        # Map UserType to role and collection
-        role_mapping = {
-            "student": {"role": "student", "collection": "students"},
-            "faculty": {"role": "faculty", "collection": "teachers"},
-            "registrar": {"role": "registrar", "collection": "registrars"}
-        }
-        
-        if user_type in role_mapping:
-            return {
-                "user_data": user_data,
-                "role": role_mapping[user_type]["role"],
-                "collection": role_mapping[user_type]["collection"]
-            }
+        return user_data
 
     return None
 
@@ -95,18 +81,19 @@ def main():
             return
 
         with st.spinner("Authenticating..."):
-            auth_result = authenticate_user(username, password)
+            user_result_data = authenticate_user(username, password)
 
-        if auth_result:
+        if user_result_data:
             # Store session data
             st.session_state.authenticated = True
+            st.session_state.name = user_result_data["Name"]
             st.session_state.username = username
-            st.session_state.role = auth_result["role"]
-            st.session_state.user_data = auth_result["user_data"]
+            st.session_state.role = user_result_data["UserType"].lower()
+            st.session_state.user_data = user_result_data
 
-            st.success(f"✅ Welcome, {username}! You are logged in as {auth_result['role'].title()}")
+            st.success(f"✅ Welcome, {user_result_data["Name"]}! You are logged in as {user_result_data["UserType"].title()}")
             st.balloons()
-            time.sleep(1)
+            time.sleep(2)
 
             st.switch_page("pages/dashboard.py")
         else:

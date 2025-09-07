@@ -39,10 +39,7 @@ def show_dashboard():
         icon = "📋"
     
     st.title(f"{icon} {role.title()} Dashboard")
-    if role == "faculty":
-        display_name = user_data.get("Teacher", username)
-    else:
-        display_name = user_data.get("Name", username)
+    display_name = user_data.get("Name", username)
     st.markdown(f"### Welcome back, **{display_name}**! 👋")
 
     setup_sidebar(role, username, display_name)
@@ -124,7 +121,8 @@ def display_dashboard_content(role):
 
 def logout():
     """Clear session and redirect to login"""
-    logout_message = f"Goodbye, {st.session_state.get('username', 'User')}! 👋"
+    
+    logout_message = f"Goodbye, {st.session_state.get('user_data', {}).get('Name', 'Username')}! 👋"
     st.session_state.clear()
     st.success(logout_message)
     st.info("Redirecting to login page...")

@@ -11,7 +11,7 @@ from pages.Faculty.dash_faculty_tab5 import show_faculty_tab5_info
 from pages.Faculty.dash_faculty_tab6 import show_faculty_tab6_info
 
 
-current_faculty = user_data = st.session_state.get('user_data', {}).get('Teacher', '')
+current_faculty = user_data = st.session_state.get('user_data', {}).get('Name', '')
 
 
 def show_faculty_dashboard_old():
@@ -37,7 +37,6 @@ def show_faculty_dashboard_old():
     with tab2:
         st.subheader("📈 Student Progress Tracker")
         show_faculty_tab2_info()  
-
     with tab3:
         st.subheader("📚 Subjects with Highest Failure Rates")
         show_faculty_tab3_info()  
