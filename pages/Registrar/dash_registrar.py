@@ -15,8 +15,7 @@ grades_cache = "pkl/grades.pkl"
 semesters_cache = "pkl/semesters.pkl"
 subjects_cache = "pkl/subjects.pkl"
 teachers_cache = "pkl/teachers.pkl"
-
-
+curriculums_cache = "pkl/curriculums.pkl"
 
 # Helper functions
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -76,6 +75,19 @@ def load_all_data():
         json.dump(log_data, f, indent=2)
     
     return data
+
+# -------- Curriculum helpers --------
+@st.cache_data(ttl=300)
+def load_curriculums_df():
+    """Load curriculums from pickle and return a DataFrame with expected columns."""
+    if not os.path.exists(curriculums_cache):
+        return pd.DataFrame()
+    data = pd.read_pickle(curriculums_cache)
+    df = pd.DataFrame(data) if isinstance(data, list) else data
+    for col in ["courseCode", "courseName", "curriculumYear", "subjects"]:
+        if col not in df.columns:
+            df[col] = None
+    return df
 
 def get_academic_standing(data, filters):
     """Get academic standing data based on filters with proper GPA calculation"""
@@ -1103,6 +1115,114 @@ def show_registrar_dashboard_new():
                     st.warning("No data available for the selected filters")
         else:
             st.info("👆 Click 'Apply Filters' to load academic standing data")
+    with tab2:
+        st.subheader("📝 Evaluation Sheet")
+        st.info("Coming soon.")
+
+    with tab3:
+        st.subheader("📚 Curriculum Viewer")
+        st.markdown("Browse curriculum details by program and year. Subjects are grouped by Year Level and Semester.")
+
+        curr_df = load_curriculums_df()
+        if curr_df.empty:
+            st.warning("No curriculum data available.")
+        else:
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                course_display = curr_df[["courseCode", "courseName"]].drop_duplicates()
+                course_display["display"] = course_display["courseCode"].astype(str) + " - " + course_display["courseName"].astype(str)
+                course_options = ["All"] + course_display["display"].tolist()
+                selected_course = st.selectbox("Program", course_options, key="curr_prog")
+            with col2:
+                year_options = ["All"] + sorted(curr_df["curriculumYear"].dropna().astype(str).unique().tolist())
+                selected_year = st.selectbox("Curriculum Year", year_options, key="curr_year")
+            with col3:
+                group_by_sem = st.checkbox("Group by Semester", value=True, key="curr_group_sem")
+
+            # Apply filters
+            filtered = curr_df.copy()
+            if selected_course != "All":
+                cc, cn = selected_course.split(" - ", 1)
+                filtered = filtered[(filtered["courseCode"].astype(str) == cc) & (filtered["courseName"].astype(str) == cn)]
+            if selected_year != "All":
+                filtered = filtered[filtered["curriculumYear"].astype(str) == selected_year]
+
+            if filtered.empty:
+                st.info("No curriculum matched the selected filters.")
+            else:
+                # Iterate through matching curriculums
+                for _, row in filtered.iterrows():
+                    st.markdown(f"### {row.get('courseCode', '')} - {row.get('courseName', '')} ({row.get('curriculumYear', '')})")
+                    subjects = row.get("subjects", []) or []
+                    if not subjects:
+                        st.info("No subjects found in this curriculum.")
+                        st.markdown("---")
+                        continue
+
+                    subj_df = pd.DataFrame(subjects)
+                    # Normalize expected columns
+                    expected_cols = [
+                        "subjectCode", "subjectName", "yearLevel", "semester", "units", "lec", "lab", "prerequisite"
+                    ]
+                    for c in expected_cols:
+                        if c not in subj_df.columns:
+                            subj_df[c] = None
+
+                    # Display grouped by YearLevel (and Semester optionally)
+                    if group_by_sem and "semester" in subj_df.columns:
+                        group_cols = ["yearLevel", "semester"]
+                    else:
+                        group_cols = ["yearLevel"]
+
+                    try:
+                        grouped = subj_df.groupby(group_cols)
+                    except Exception:
+                        # Fallback if grouping fails due to types
+                        subj_df["yearLevel"] = subj_df["yearLevel"].astype(str)
+                        if "semester" in subj_df.columns:
+                            subj_df["semester"] = subj_df["semester"].astype(str)
+                        grouped = subj_df.groupby(group_cols)
+
+                    total_units_overall = 0
+                    for grp_key, grp in grouped:
+                        if isinstance(grp_key, tuple):
+                            title = " - ".join([f"Year {grp_key[0]}"] + ([f"Sem {grp_key[1]}"] if len(grp_key) > 1 else []))
+                        else:
+                            title = f"Year {grp_key}"
+                        st.subheader(f"📘 {title}")
+
+                        display_cols = [
+                            "subjectCode", "subjectName", "lec", "lab", "units", "prerequisite"
+                        ]
+                        show_df = grp[display_cols].rename(columns={
+                            "subjectCode": "Subject Code",
+                            "subjectName": "Subject Name",
+                            "lec": "Lec",
+                            "lab": "Lab",
+                            "units": "Units",
+                            "prerequisite": "Prerequisite"
+                        })
+                        st.dataframe(show_df, use_container_width=True, hide_index=True)
+
+                        # Totals
+                        units_sum = pd.to_numeric(grp["units"], errors="coerce").fillna(0).sum()
+                        lec_sum = pd.to_numeric(grp["lec"], errors="coerce").fillna(0).sum()
+                        lab_sum = pd.to_numeric(grp["lab"], errors="coerce").fillna(0).sum()
+                        total_units_overall += units_sum
+
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Total Units", f"{int(units_sum)}")
+                        c2.metric("Total Lec Hours", f"{int(lec_sum)}")
+                        c3.metric("Total Lab Hours", f"{int(lab_sum)}")
+                        st.markdown("---")
+
+                    st.success(f"Overall Units in Curriculum: {int(total_units_overall)}")
+                    st.markdown("---")
+
+    with tab4:
+        st.subheader("👨‍🏫 Teacher Analysis")
+        st.info("Coming soon.")
 
 def show_registrar_dashboard():
     """Main dashboard function with toggle between old and new implementations"""

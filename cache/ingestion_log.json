@@ -1,16 +1,6 @@
 {
-<<<<<<< HEAD
-  "timestamp": 1757222255.5490847,
-  "load_time_seconds": 4.866552114486694,
-=======
-<<<<<<< HEAD
-  "timestamp": 1757120883.1246767,
-  "load_time_seconds": 2.659421443939209,
-=======
-  "timestamp": 1757125501.164835,
-  "load_time_seconds": 6.248899936676025,
->>>>>>> d890032b64b193aa40c1fa376e1b2224dabc7f42
->>>>>>> 6ed7bdb03c5dd47930274e06ec33baa5bc980de7
+  "timestamp": 1757235044.2413843,
+  "load_time_seconds": 5.496253490447998,
   "records_loaded": {
     "students": 500000,
     "grades": 10000,
