@@ -32,3 +32,5 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+pages/Faculty/__pycache__/dash_faculty.cpython-313.pyc
+__pycache__/dbconnect.cpython-313.pyc
