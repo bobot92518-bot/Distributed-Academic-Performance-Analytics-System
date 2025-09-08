@@ -370,4 +370,3 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
     except Exception as e:
         st.error(f"Error querying students: {e}")
         return []
-
