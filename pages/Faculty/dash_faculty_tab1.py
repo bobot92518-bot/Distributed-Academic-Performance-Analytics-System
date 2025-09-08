@@ -1,86 +1,13 @@
 import streamlit as st
+import altair as alt
 import pandas as pd 
-from global_utils import load_pkl_data, students_cache, grades_cache, semesters_cache, subjects_cache
-from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher
+import matplotlib.pyplot as plt
+from global_utils import result_records_to_dataframe
+from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
 
-current_faculty = user_data = st.session_state.get('user_data', {}).get('Teacher', '')
+current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
-
-def get_student_grades_by_subject_and_semester( semester_id=None, subject_code=None):
-    """Retrieve all student grades for subjects taught by a specific teacher in a given semester"""
-    try:
-        # Load datasets
-        grades_data = load_pkl_data(grades_cache)
-        students_data = load_pkl_data(students_cache)
-        subjects_data = load_pkl_data(subjects_cache)
-        semesters_data = load_pkl_data(semesters_cache)
-
-        # Convert to DataFrames if needed
-        grades_df = pd.DataFrame(grades_data) if isinstance(grades_data, list) else grades_data
-        students_df = pd.DataFrame(students_data) if isinstance(students_data, list) else students_data
-        subjects_df = pd.DataFrame(subjects_data) if isinstance(subjects_data, list) else subjects_data
-        semesters_df = pd.DataFrame(semesters_data) if isinstance(semesters_data, list) else semesters_data
-
-        if grades_df.empty:
-            return []
-
-        # Expand SubjectCodes + Grades + Teachers into rows
-        grades_expanded = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
-
-        # Filter by teacher
-        grades_expanded = grades_expanded[grades_expanded["Teachers"] == current_faculty]
-
-        # Optional filters
-        if semester_id:
-            grades_expanded = grades_expanded[grades_expanded["SemesterID"] == semester_id]
-        if subject_code:
-            grades_expanded = grades_expanded[grades_expanded["SubjectCodes"] == subject_code]
-
-        if grades_expanded.empty:
-            st.warning("No grades available")
-        # Join with students, subjects, semesters
-        merged = (
-            grades_expanded
-            .merge(students_df, left_on="StudentID", right_on="_id", suffixes=("", "_student"))
-            .merge(subjects_df, left_on="SubjectCodes", right_on="_id", suffixes=("", "_subject"))
-            .merge(semesters_df, left_on="SemesterID", right_on="_id", suffixes=("", "_semester"))
-        )
-
-        # Select relevant columns
-        results = merged[[
-            "Semester", "SchoolYear", "SubjectCodes", "Description", "Units", "Name", "Grades"
-        ]].rename(columns={
-            "Semester": "semester",
-            "SchoolYear": "schoolYear",
-            "SubjectCodes": "subjectCode",
-            "Description": "subjectDescription",
-            "Units": "units",
-            "Name": "studentName",
-            "Grades": "grade"
-        })
-
-        # Sort like Mongo pipeline
-        results = results.sort_values(
-            by=["schoolYear", "semester", "subjectCode", "studentName"],
-            ascending=[False, True, True, True]
-        )
-
-        return results.to_dict("records")
-
-    except Exception as e:
-        st.error(f"Error querying grades: {e}")
-        return []
-
-
-def create_grades_dataframe(results):
-    """Convert results to pandas DataFrame"""
-    if not results:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(results)
-    return df
-
-def display_grades_table(df, semester_filter = None, subject_filter = None):
+def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_filter = None):
     """Display grades in Streamlit format"""
     if df.empty:
         st.warning("No grades found for the selected criteria.")
@@ -97,81 +24,127 @@ def display_grades_table(df, semester_filter = None, subject_filter = None):
     if filtered_df.empty:
         st.warning("No grades found for the selected filters.")
         return
+    year_map = {
+        1: "1st Year",
+        2: "2nd Year",
+        3: "3rd Year",
+        4: "4th Year",
+        5: "5th Year",
+    }
+    subject_year_map = {
+        0: "",
+        1: "| &nbsp; &nbsp; 1st Year Subject",
+        2: "| &nbsp; &nbsp; 2nd Year Subject",
+        3: "| &nbsp; &nbsp; 3rd Year Subject",
+        4: "| &nbsp; &nbsp; 4th Year Subject",
+        5: "| &nbsp; &nbsp; 5th Year Subject",
+    }
+    
+    
     
     # Group by semester and subject
-    for (semester, school_year, subject_code, subject_desc, units), group in filtered_df.groupby(
-        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'units']
+    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel), group in filtered_df.groupby(
+        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel']
     ):
-        with st.expander(f"{semester} - {school_year}   |   {subject_code} - {subject_desc}", expanded=True):
-            # Create table
-            table_data = group[['studentName', 'grade']].copy()
-            table_data.columns = ['Student', 'Grade']
-            table_data['Grade_num'] = table_data['Grade']  # numeric
-            table_data['Grade'] = table_data['Grade'].astype(str)  # string for left-alignment
-            # Add Status column
-            table_data['Status'] = table_data['Grade_num'].apply(lambda g: 'Passed' if g >= 75 else 'Failed')
-            display_df = table_data[['Student', 'Grade', 'Status']]
-            # Function to color the Status column
-            def color_status(val):
-                if val == 'Passed':
-                    return 'color: green; font-weight: bold'
+        
+        with st.expander(f"{semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_year_map.get(SubjectYearLevel, "")}", expanded=True):
+            
+            table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade']].copy()
+            table_data.columns = ['Student ID', 'Student Name', 'Course', 'YearLevel', 'Grade']
+            
+            table_data['Grade_num'] = pd.to_numeric(table_data['Grade'], errors='coerce')
+            table_data['Student ID'] = table_data['Student ID'].astype(str)
+            
+            course_column = ""
+            year_column = ""
+            if is_new_curriculum:
+                year_column = "Year Taken"
+                table_data[f"{year_column}"] = year_map.get(SubjectYearLevel, "")
+                course_column = "Year-Course"
+                table_data[f"{course_column}"] = (table_data["YearLevel"].map(year_map).fillna("") + " - " + table_data["Course"])
+            else:
+                course_column = "Course"
+                year_column = "Year Level"
+                table_data[f"{year_column}"] = table_data["YearLevel"].map(year_map).fillna("")
+            
+            def grade_with_star(grade):
+                if pd.isna(grade) or grade == 0:
+                    return "Not Set"
                 else:
-                    return 'color: darkred; font-weight: bold'
-            
-            # Apply styling
-            styled_df = (display_df.style.applymap(color_status, subset=['Status']))
-            
-            # Display responsive table without index
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-            
+                    if grade < 75:
+                        return f"🛑 {grade}"
+                    else:
+                        return f"⭐ {grade}"   
+
+            table_data['Grade'] = table_data['Grade_num'].apply(grade_with_star)
+
+            # Final display
+            display_df = table_data[['Student ID', 'Student Name', f"{course_column}", f"{year_column}", 'Grade']]
+
             # Quick stats
+            valid_grades = table_data["Grade_num"][
+                (table_data["Grade_num"].notna()) & (table_data["Grade_num"] > 0)
+            ]
+
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Students", len(table_data))
+                st.metric("Total Students", len(table_data))
             with col2:
-                st.metric("Average", f"{table_data['Grade_num'].mean():.1f}")
+                st.metric("Class Average", f"{valid_grades.mean():.1f}" if not valid_grades.empty else "N/A")
             with col3:
-                st.metric("Highest", f"{table_data['Grade_num'].max()}")
+                st.metric("Highest Grade", f"{valid_grades.max()}" if not valid_grades.empty else "N/A")
             with col4:
-                st.metric("Lowest", f"{table_data['Grade_num'].min()}")
-            
-            st.markdown("**Grade Distribution**")
-            chart_data = table_data.set_index('Student')
-            st.bar_chart(chart_data['Grade_num'], use_container_width=True)
-            
-            #USING MATPLOTLIB
-            # grades = table_data['Grade']
-            # students = table_data['Student']
-            # colors = ['green' if g >= 75 else 'red' for g in grades]
+                st.metric("Lowest Grade", f"{valid_grades.min()}" if not valid_grades.empty else "N/A")
 
-            # fig, ax = plt.subplots(figsize=(max(6, len(students)*0.6), 4))  # Adjust width based on #students
-            # ax.bar(students, grades, color=colors)
-            # ax.set_ylabel("Grade")
-            # ax.set_xlabel("Student")
-            # ax.set_ylim(0, 100)
-            # ax.set_title("Grade Distribution")
-            # plt.xticks(rotation=45, ha='right')  # Rotate names for readability
-            # plt.tight_layout()
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            # st.pyplot(fig)
+            
+            
+            st.markdown("**Class Grade Distribution**")
+            # chart_data = table_data.set_index('Student Name')
+            # st.bar_chart(chart_data['Grade_num'], use_container_width=True)
+            
+            table_data["Grade Status"] = table_data["Grade_num"].apply(
+                lambda g: "Not Set" if pd.isna(g) or g == 0
+                else ("Grade Above 75" if g >= 75 else "Grade Below 75")
+            )
 
-def show_faculty_tab1_info():
+            chart = (
+                alt.Chart(table_data[table_data["Grade Status"] != "Not Set"])
+                .mark_bar()
+                .encode(
+                    x=alt.X("Student Name", title="Students", sort=None),
+                    y=alt.Y("Grade_num", title="Student Grades"),
+                    color=alt.Color(
+                        "Grade Status",
+                        title="Grade Category",
+                        scale=alt.Scale(
+                            domain=["Grade Above 75", "Grade Below 75"],
+                            range=["green", "red"]
+                        )
+                    )
+                )
+            )
 
-    semesters = get_semesters_list()
-    subjects = get_subjects_by_teacher(current_faculty)
+            st.altair_chart(chart, use_container_width=True)
+
+def show_faculty_tab1_info(new_curriculum):
+    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
+    semesters = get_semesters_list(new_curriculum)
+    subjects = get_subjects_by_teacher(current_faculty, new_curriculum)
     
     col1, col2 = st.columns([1, 1])
     
     
     with col1:
-        semester_options = [" - All Semesters - "] + [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
+        semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
         selected_semester_display = st.selectbox(
             "📅 Select Semester", 
             semester_options,
             key="main_semester"
         )
     with col2:
-        subject_options = [" - All Subjects - "] + [f"{subj['_id']} - {subj['Description']}" for subj in subjects]
+        subject_options = [f"{subj['_id']} - {subj['Description']}" for subj in subjects]
         selected_subject_display = st.selectbox(
             "📚 Select Subject", 
             subject_options,
@@ -192,22 +165,25 @@ def show_faculty_tab1_info():
                 selected_subject_code = subj['_id']
                 break
             
-    if st.button("📊 Load Grades", type="secondary"):
+    if st.button("📊 Load Class", type="secondary", key="tab1_load_button"):
         with st.spinner("Loading grades data..."):
             
-            results = get_student_grades_by_subject_and_semester(selected_semester_id, selected_subject_code)
+            if new_curriculum:
+                results = get_new_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
+            else:
+                results = results = get_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
             
             if results:
-                df = create_grades_dataframe(results)
+                df = result_records_to_dataframe(results)
                 
                 # Store in session state for other tabs
                 st.session_state.grades_df = df
                 st.session_state.current_faculty = current_faculty
                 
                 # Display results
-                st.success(f"Found {len(results)} grade records for {current_faculty}")
-                
-                display_grades_table(df, selected_semester_display, selected_subject_display)
+                # st.success(f"Found {len(results)} grade records for {current_faculty}")
+                st.divider()
+                display_grades_table(new_curriculum, df, selected_semester_display, selected_subject_display)
                 
             else:
                 st.warning(f"No grades found for {current_faculty} in the selected semester.")

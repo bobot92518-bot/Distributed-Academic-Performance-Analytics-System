@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd 
 import plotly.express as px
 from global_utils import pkl_data_to_df, subjects_cache
-from pages.Faculty.faculty_data_helper import get_dataframe_grades, get_semesters_list, get_students_from_grades
+from pages.Faculty.faculty_data_helper import get_semesters_list
 from pages.Faculty.faculty_pdf_generator import generate_student_grades_report_pdf
 
-current_faculty = user_data = st.session_state.get('user_data', {}).get('Teacher', '')
+current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
 
 
@@ -19,8 +19,8 @@ def get_student_curriculum(student_id):
     
     
 
-def show_faculty_tab6_info():
-    
+def show_faculty_tab6_info(new_curriculum):
+    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
     st.title("Additional Filtered Queries.")
     
     with st.form(key="queries_search_form"):

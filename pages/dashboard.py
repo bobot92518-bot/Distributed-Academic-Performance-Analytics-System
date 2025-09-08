@@ -38,6 +38,16 @@ def show_dashboard():
     elif role == "registrar":
         icon = "📋"
     
+    st.markdown("""
+        <style>
+            /* Hide "Pages" header */
+            div[data-testid="stMainBlockContainer"] {padding:60px 40px;}
+            
+            /* Hide entire nav container */
+            #faculty-dashboard {padding:0;}
+        </style>
+    """, unsafe_allow_html=True)
+    
     st.title(f"{icon} {role.title()} Dashboard")
     display_name = user_data.get("Name", username)
     st.markdown(f"### Welcome back, **{display_name}**! 👋")
@@ -97,11 +107,9 @@ def display_dashboard_content(role):
             else:
                 st.info("Module loaded but no entry function found.")
         elif role == "faculty" and current_page == "faculty_main":
-            import pages.Faculty.dash_faculty as dash_faculty
-            if hasattr(dash_faculty, 'main'):
-                dash_faculty.main()
-            elif hasattr(dash_faculty, 'show_faculty_dashboard'):
-                dash_faculty.show_faculty_dashboard()
+            from pages.Faculty.dash_faculty import show_faculty_dashboard
+            if show_faculty_dashboard:
+                show_faculty_dashboard()
             else:
                 st.info("Module loaded but no entry function found.")
         elif role == "registrar" and current_page == "registrar_main":
@@ -126,7 +134,7 @@ def logout():
     st.session_state.clear()
     st.success(logout_message)
     st.info("Redirecting to login page...")
-    time.sleep(1)
+    time.sleep(2)
     st.switch_page("app.py")
 
 # Run dashboard

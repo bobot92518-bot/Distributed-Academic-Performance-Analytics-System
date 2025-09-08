@@ -1,17 +1,20 @@
 import streamlit as st
 import pandas as pd 
 import plotly.express as px
-from global_utils import pkl_data_to_df, grades_cache, students_cache, subjects_cache, semesters_cache
-from pages.Faculty.faculty_data_helper import get_dataframe_grades, get_semesters_list, get_students_from_grades
+from global_utils import pkl_data_to_df, grades_cache, students_cache, subjects_cache, semesters_cache, new_grades_cache, new_subjects_cache
+from pages.Faculty.faculty_data_helper import get_semesters_list, get_students_from_grades
 
-current_faculty = user_data = st.session_state.get('user_data', {}).get('Teacher', '')
+current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
 @st.cache_data(ttl=300)
-def compute_student_risk_analysis(selected_semester_id = None, passing_grade: int = 75):
-    students_df = get_students_from_grades(teacher_name = current_faculty)
-    grades_df = pkl_data_to_df(grades_cache)
+def compute_student_risk_analysis(is_new_curriculum, selected_semester_id = None, passing_grade: int = 75):
+    
+    
+    subjects_df = pkl_data_to_df(new_subjects_cache if is_new_curriculum else subjects_cache)
+    subjects_df = subjects_df[subjects_df["Teacher"] == current_faculty]
+    students_df = get_students_from_grades(is_new_curriculum, teacher_name = current_faculty)
+    grades_df = pkl_data_to_df(new_grades_cache if is_new_curriculum else  grades_cache)
     # students_df = pkl_data_to_df(students_cache)
-    subjects_df = pkl_data_to_df(subjects_cache)
     semesters_df = pkl_data_to_df(semesters_cache)
     
     if grades_df.empty:
@@ -40,12 +43,15 @@ def compute_student_risk_analysis(selected_semester_id = None, passing_grade: in
 
     # Optional: set NaN grades to 0 for averaging if you want them counted as fail
     merged["Grades"] = merged["Grades"].fillna(0)
-
+    merged["Failed_SubjectDesc"] = merged.apply(
+        lambda r: r["Description"] if r["is_fail"] else None, axis=1
+    )
     # Group per student
     student_summary = merged.groupby(["StudentID", "Student", "YearLevel"]).agg(
         Avg_Grade=("Grades", "mean"),
         Failed_Subjs=("is_fail", "sum"),
-        Total_Subjs=("Grades", "count")
+        Total_Subjs=("Grades", "count"),
+        Failed_Subjects=("Failed_SubjectDesc", lambda x: ", ".join(x.dropna()))
     ).reset_index()
 
     # Round averages
@@ -69,19 +75,19 @@ def compute_student_risk_analysis(selected_semester_id = None, passing_grade: in
 
     # Final ordered output
     return student_summary[[
-        "StudentID", "Student", "Avg_Grade","Total_Subjs", "Failed_Subjs", "Risk Reason(s)", "Intervention Candidate", "YearLevel"
+        "StudentID", "Student", "Avg_Grade","Total_Subjs", "Failed_Subjs","Failed_Subjects", "Risk Reason(s)", "Intervention Candidate", "YearLevel"
     ]]
     
 
-def show_faculty_tab4_info():
+def show_faculty_tab4_info(new_curriculum):
+    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
     st.title("Identify students at risk based on current semester performance.")
-    semesters = get_semesters_list();
+    semesters = get_semesters_list(new_curriculum)
     year_levels = [
         {"value": 1, "label": "1st Year"},
         {"value": 2, "label": "2nd Year"},
         {"value": 3, "label": "3rd Year"},
-        {"value": 4, "label": "4th Year"},
-        {"value": 0, "label": " - All Year Levels - "}
+        {"value": 4, "label": "4th Year"}
     ]
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
@@ -109,7 +115,7 @@ def show_faculty_tab4_info():
     if selected_year_level_display != 0:
         selected_year_level = selected_year_level_display
     
-    student_df = compute_student_risk_analysis(selected_semester_id=selected_semester_id)
+    student_df = compute_student_risk_analysis(is_new_curriculum = new_curriculum, selected_semester_id=selected_semester_id)
     if student_df.empty:
         st.warning("No student data available.")
         return
@@ -127,8 +133,9 @@ def show_faculty_tab4_info():
                 "StudentID": "Student ID",
                 "Student": "Student Name",
                 "Avg_Grade": "Avg Grade",
-                "Total_Subjs": "Total Subjectss",
-                "Failed_Subjs": "Failed Subjects",
+                "Total_Subjs": "Total Subjects",
+                "Failed_Subjs": "No. of Failed Subjects",
+                "Failed_Subjects": "Failed Subjects",
                 "Risk_Reasons": "Risk Reason(s)",
                 "Intervention_Candidate": "Intervention Candidate"
             })
@@ -145,7 +152,7 @@ def show_faculty_tab4_info():
                 names='Intervention Candidate',
                 values='Count',
                 color='Intervention Candidate',
-                color_discrete_map={"✅ Yes": "red", "❌ No": "green"},
+                color_discrete_map={"✅ Yes": "Needs Intervention", "❌ Passed": "green"},
                 title=f"{yl_label} - Intervention Candidate Distribution"
             )
             st.plotly_chart(fig, use_container_width=True)

@@ -7,9 +7,12 @@ students_cache = "pkl/students.pkl"
 grades_cache = "pkl/grades.pkl"
 semesters_cache = "pkl/semesters.pkl"
 subjects_cache = "pkl/subjects.pkl"
-teachers_cache = "pkl/teachers.pkl"
 registrar_cache = "pkl/registrars.pkl"
 user_accounts_cache = "pkl/user_accounts.pkl"
+curriculums_cache = "pkl/curriculums.pkl"
+new_grades_cache = "pkl/new_grades.pkl"
+new_students_cache = "pkl/new_students.pkl"
+new_subjects_cache = "pkl/new_subjects.pkl"
 
 @st.cache_data
 def load_pkl_data(cache_path):
@@ -34,6 +37,17 @@ def export_to_pdf(df, filename):
 
 def pkl_data_to_df(cache_path):
     pkl_data = load_pkl_data(cache_path)
-    return pd.DataFrame(pkl_data) if isinstance(pkl_data, list) else pkl_data
+    pkl_pd_data = pd.DataFrame(pkl_data) if isinstance(pkl_data, list) else pkl_data
+    if pkl_pd_data.empty:
+        st.warning(f"{cache_path} is empty!")
+    return pkl_pd_data
 
+
+def result_records_to_dataframe(results):
+    """Convert results to pandas DataFrame"""
+    if not results:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(results)
+    return df
 
