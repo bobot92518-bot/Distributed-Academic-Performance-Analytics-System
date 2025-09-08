@@ -99,7 +99,7 @@ def display_dashboard_content(role):
 
     try:
         if role == "student" and current_page == "student_main":
-            import pages.student.stddash as dash_student
+            import pages.student.dash_student as dash_student
             if hasattr(dash_student, 'main'):
                 dash_student.main()
             elif hasattr(dash_student, 'show_student_dashboard'):
