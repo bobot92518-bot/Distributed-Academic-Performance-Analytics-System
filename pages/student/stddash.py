@@ -743,8 +743,7 @@ def show_student_dashboard_new():
     with tab3:
         st.subheader("📈 Curriculum Viewer")
         st.markdown("This is Sample tab for New Version")
-      
-        
+              
     with tab4:
         st.subheader("👨‍🏫 Teacher Analysis")
         st.markdown("This is Sample tab for New Version")

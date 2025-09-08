@@ -10,6 +10,7 @@ subjects_cache = "pkl/subjects.pkl"
 teachers_cache = "pkl/teachers.pkl"
 registrar_cache = "pkl/registrars.pkl"
 user_accounts_cache = "pkl/user_accounts.pkl"
+curriculums_cache = "pkl/curriculums.pkl"
 
 @st.cache_data
 def load_pkl_data(cache_path):
