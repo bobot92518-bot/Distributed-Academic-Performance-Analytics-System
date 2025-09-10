@@ -6,6 +6,34 @@ from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_b
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
+def display_chat(table_data):
+    # chart_data = table_data.set_index('Student Name')
+    # st.bar_chart(chart_data['Grade_num'], use_container_width=True)
+            
+    table_data["Grade Status"] = table_data["Grade_num"].apply(
+        lambda g: "Not Set" if pd.isna(g) or g == 0
+        else ("Grade Above 75" if g >= 75 else "Grade Below 75")
+    )
+
+    chart = (
+        alt.Chart(table_data[table_data["Grade Status"] != "Not Set"])
+        .mark_bar()
+        .encode(
+            x=alt.X("Student Name", title="Students", sort=None),
+            y=alt.Y("Grade_num", title="Student Grades"),
+            color=alt.Color(
+                "Grade Status",
+                title="Grade Category",
+                scale=alt.Scale(
+                    domain=["Grade Above 75", "Grade Below 75"],
+                    range=["green", "red"]
+                )
+            )
+        )
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
 def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_filter = None):
     """Display grades in Streamlit format"""
     if df.empty:
@@ -53,42 +81,10 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
             
             table_data['Grade_num'] = pd.to_numeric(table_data['Grade'], errors='coerce')
             table_data['Student ID'] = table_data['Student ID'].astype(str)
+            table_data['Grade Status'] = table_data['Grade_num'].apply(
+                lambda x: "Pending" if pd.isna(x) or x == 0 else "Completed"
+            )
             
-            
-            # Manual table rendering instead of st.table
-            st.markdown("### Student Grades")
-
-            # Table header
-            cols = st.columns([1, 3, 3])  # adjust widths
-            with cols[0]: st.markdown("**Student ID**")
-            with cols[1]: st.markdown("**Student Name**")
-            with cols[2]: st.markdown("**Grade**")
-
-            # Loop over students
-            for _, row in table_data.iterrows():
-                cols = st.columns([1, 3, 3])
-
-                with cols[0]:
-                    st.markdown(str(row["Student ID"]))
-
-                with cols[1]:
-                    st.markdown(row["Student Name"])
-
-                with cols[2]:
-                    grade = row["Grade_num"]
-                    if pd.isna(grade) or grade == 0:
-                         new_val = st.text_input(
-                            "Enter new grade",
-                            value="" if pd.isna(row["Grade_num"]) or row["Grade_num"] == 0 else str(int(row["Grade_num"])),
-                            key=f"grade_input_{row['Student ID']}",
-                            label_visibility="collapsed"
-                        )
-
-                    else:
-                        color = "red" if grade < 75 else "black"
-                        st.markdown(f"<span style='color:{color};'>{grade}</span>", unsafe_allow_html=True)
-            st.session_state[f"grade_{row['Student ID']}"] = new_val
-            # Quick stats
             valid_grades = table_data["Grade_num"][
                 (table_data["Grade_num"].notna()) & (table_data["Grade_num"] > 0)
             ]
@@ -105,37 +101,11 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
             with col5:
                 st.metric("No Grades", len(invalid_valid_grades))
                 
-            # st.table(display_df)
-            
-            
-            
+            # Manual table rendering instead of st.table
+            st.markdown("### Student Grades")
+
             st.markdown("**Class Grade Distribution**")
-            # chart_data = table_data.set_index('Student Name')
-            # st.bar_chart(chart_data['Grade_num'], use_container_width=True)
-            
-            table_data["Grade Status"] = table_data["Grade_num"].apply(
-                lambda g: "Not Set" if pd.isna(g) or g == 0
-                else ("Grade Above 75" if g >= 75 else "Grade Below 75")
-            )
-
-            chart = (
-                alt.Chart(table_data[table_data["Grade Status"] != "Not Set"])
-                .mark_bar()
-                .encode(
-                    x=alt.X("Student Name", title="Students", sort=None),
-                    y=alt.Y("Grade_num", title="Student Grades"),
-                    color=alt.Color(
-                        "Grade Status",
-                        title="Grade Category",
-                        scale=alt.Scale(
-                            domain=["Grade Above 75", "Grade Below 75"],
-                            range=["green", "red"]
-                        )
-                    )
-                )
-            )
-
-            st.altair_chart(chart, use_container_width=True)
+            display_chat(table_data)
 
 def show_faculty_tab5_info(new_curriculum):
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
