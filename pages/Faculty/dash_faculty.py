@@ -25,32 +25,28 @@ def get_active_curriculum(new_curriculum):
         return f"&nbsp;&nbsp; | &nbsp;&nbsp; School Year: {curriculum_df["curriculumYear"].iloc[0]}"
     else:
         return ""
-
+if "active_load" not in st.session_state:
+        st.session_state.active_load = None
+        
 def show_faculty_dashboard():
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
     """Main faculty dashboard function with toggle between old and new implementations"""
-    # Add toggle at the top left
-    # col1, col2 = st.columns([3, 1])
-    # with col1:
-    #     new_curriculum = st.toggle(
-    #         "📘 Curriculum Mode", 
-    #         value=True,
-    #         help="Switch between the old curriculum and the new curriculum"
-    #     )
+
     new_subjects_df = pkl_data_to_df(new_subjects_cache)
     new_curriculum = not (new_subjects_df[new_subjects_df["Teacher"] == current_faculty].empty)
 
     
     label = "📗 New Curriculum &nbsp; &nbsp; | &nbsp; &nbsp; School Year 2022 - 2023" if new_curriculum else "📙 Old Curriculum"
     st.write(f"Currently showing: **{label}**")
-    # Call the appropriate version based on toggle
+    
     st.set_page_config(
         page_title="DAPAS - Faculty Dashboard",
         page_icon="🏫",
         layout="wide"
     )
     
-    data_query_label = f"{"🔍 Data Query (LO2)" if new_curriculum else "🔍 Data Query"}"
+    # data_query_label = f"{"🔍 Data Query (LO2)" if new_curriculum else "🔍 Data Query"}"
+    data_query_label = f"{"🔍 Data Query"}"
     
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📋 Class List",

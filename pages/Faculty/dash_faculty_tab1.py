@@ -129,6 +129,15 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
 
 def show_faculty_tab1_info(new_curriculum):
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
+    
+    # Initialize Tab 1 specific session state
+    if 'tab1_grades_df' not in st.session_state:
+        st.session_state.tab1_grades_df = None
+    if 'tab1_current_faculty' not in st.session_state:
+        st.session_state.tab1_current_faculty = current_faculty
+    if 'tab1_loaded_filters' not in st.session_state:
+        st.session_state.tab1_loaded_filters = {} 
+    
     semesters = get_semesters_list(new_curriculum)
     subjects = get_subjects_by_teacher(current_faculty, new_curriculum)
     
@@ -164,25 +173,41 @@ def show_faculty_tab1_info(new_curriculum):
                 selected_subject_code = subj['_id']
                 break
             
-    if st.button("📊 Load Class", type="secondary", key="tab1_load_button"):
+    if st.button("📊 Load Class", type="secondary", key="tab1_load_button1"):
         with st.spinner("Loading grades data..."):
             
             if new_curriculum:
                 results = get_new_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
             else:
-                results = results = get_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
+                results = get_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
             
             if results:
                 df = result_records_to_dataframe(results)
                 
-                # Store in session state for other tabs
-                st.session_state.grades_df = df
-                st.session_state.current_faculty = current_faculty
-                
-                # Display results
-                # st.success(f"Found {len(results)} grade records for {current_faculty}")
-                st.divider()
-                display_grades_table(new_curriculum, df, selected_semester_display, selected_subject_display)
+                # Store in TAB 1 SPECIFIC session state keys
+                st.session_state.tab1_grades_df = df
+                st.session_state.tab1_current_faculty = current_faculty
+                st.session_state.tab1_loaded_filters = {
+                    'semester': selected_semester_display,
+                    'subject': selected_subject_display
+                }
                 
             else:
                 st.warning(f"No grades found for {current_faculty} in the selected semester.")
+                st.session_state.tab1_grades_df = None
+    
+    # Display grades if they exist in Tab 1 session state
+    if st.session_state.tab1_grades_df is not None and not st.session_state.tab1_grades_df.empty:
+        # Show current filter info for Tab 1
+        if st.session_state.tab1_loaded_filters:
+            st.info(f"📋 Tab 1 - Showing grades for: **{st.session_state.tab1_loaded_filters.get('semester', 'All')}** | **{st.session_state.tab1_loaded_filters.get('subject', 'All')}**")
+        
+        st.divider()
+        display_grades_table(new_curriculum, st.session_state.tab1_grades_df, 
+                           st.session_state.tab1_loaded_filters.get('semester'),
+                           st.session_state.tab1_loaded_filters.get('subject'))
+        
+    elif st.session_state.tab1_grades_df is not None and st.session_state.tab1_grades_df.empty:
+        st.warning("No students found matching the current filters.")
+    else:
+        st.info("👆 Select your filters and click 'Load Class' to view student data.")
