@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-streamlit
-pandas
-python-dotenv
-matplotlib
-altair
-plotly
-pymongo
-=======
 streamlit>=1.31.0
 pandas>=2.0.0
 python-dotenv>=1.0.0
@@ -16,4 +7,4 @@ plotly>=5.18.0
 matplotlib>=3.8.0
 reportlab>=4.0.0
 numpy>=1.24.0
->>>>>>> 96297fd57a64b4b9dcfb60b912ff99e800cb456d
+altair
