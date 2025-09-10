@@ -1,26 +1,32 @@
 import os
 from dotenv import load_dotenv
 from pymongo import MongoClient
+import streamlit as st
 
 load_dotenv()
 
-MONGO_URI = os.getenv("MONGO_URI")
+# Prefer environment variable, then Streamlit secrets if available
+MONGO_URI = os.getenv("MONGO_URI") or st.secrets.get("MONGO_URI", None)
 
-database = None
+client = None
 
 def db_connect():
+    global client
     try:
-        database = MongoClient(MONGO_URI)
-        db = database["mit261"]
+        if client is None:
+            if not MONGO_URI:
+                raise ValueError("MONGO_URI is not set. Provide it via environment or Streamlit secrets.")
+            client = MongoClient(MONGO_URI)
+        db = client["mit261"]
         print("Connected to MongoDB:", db.name)
         return db
     except Exception as e:
         print("Connection failed:", e)
         return None
-        return none
 
 def close_db_connect():
-    global database
-    if database:
-        database.close()
+    global client
+    if client:
+        client.close()
+        client = None
         print("🔒 MongoDB connection closed")

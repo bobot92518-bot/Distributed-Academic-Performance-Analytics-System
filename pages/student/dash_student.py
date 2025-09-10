@@ -245,75 +245,125 @@ def show_student_dashboard_old():
         with tab2:
             df = pd.DataFrame(grades)
             df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+
             if "Semester" in df.columns and "SchoolYear" in df.columns:
-                grouped = df.groupby(["SchoolYear", "Semester"])
                 subjects_df = get_subjects()
-                for (sy, sem), sem_df in grouped:
-                    st.subheader(f"{sy} - Semester {sem}")
-                    if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
-                        expanded_df = pd.DataFrame({
-                            "SubjectCodes": sem_df["SubjectCodes"].explode().values,
-                            "Teacher": sem_df["Teachers"].explode().values,
-                            "Grade": sem_df["Grades"].explode().values
-                        })
-                    else:
-                        expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
-                            columns={"Teachers": "Teacher", "Grades": "Grade"}
-                        )
-                    expanded_df = expanded_df.merge(
-                        subjects_df.rename(columns={"_id": "SubjectCodes"}),
-                        on="SubjectCodes",
-                        how="left"
+
+                # Expand subject codes
+                if "SubjectCodes" in df and df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                    expanded_df = pd.DataFrame({
+                        "SubjectCodes": df["SubjectCodes"].explode().values,
+                        "Teacher": df["Teachers"].explode().values,
+                        "Grade": df["Grades"].explode().values,
+                        "SchoolYear": df["SchoolYear"].repeat(df["SubjectCodes"].str.len()).values,
+                        "Semester": df["Semester"].repeat(df["SubjectCodes"].str.len()).values
+                    })
+                else:
+                    expanded_df = df[["SubjectCodes", "Teachers", "Grades", "SchoolYear", "Semester"]].rename(
+                        columns={"Teachers": "Teacher", "Grades": "Grade"}
                     )
-                    if "Description" not in expanded_df.columns:
-                        expanded_df["Description"] = "N/A"
-                    columns_to_show = ["SubjectCodes", "Description", "Teacher", "Grade"]
-                    expanded_df = expanded_df[[c for c in columns_to_show if c in expanded_df.columns]]
-                    st.dataframe(expanded_df, use_container_width=True)
-                    if "Grade" in expanded_df.columns:
-                        valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
-                        if not valid_grades.empty:
-                            avg = valid_grades.mean()
-                            st.write(f"**Semester Average: {avg:.2f}**")
-                        else:
-                            st.write("**Semester Average: N/A**")
-                    st.markdown("---")
+
+                # Merge with subjects
+                expanded_df = expanded_df.merge(
+                    subjects_df.rename(columns={"_id": "SubjectCodes"}),
+                    on="SubjectCodes",
+                    how="left"
+                )
+
+                if "Description" not in expanded_df.columns:
+                    expanded_df["Description"] = "N/A"
+
+                # Convert Grade to numeric
+                expanded_df["Grade"] = pd.to_numeric(expanded_df["Grade"], errors="coerce")
+
+                # ✅ Filter only failing grades (<75)
+                failed_df = expanded_df[expanded_df["Grade"] < 75]
+
+                # Reorder columns
+                columns_to_show = ["SchoolYear", "Semester", "SubjectCodes", "Description", "Teacher", "Grade"]
+                failed_df = failed_df[[c for c in columns_to_show if c in failed_df.columns]]
+
+                # ✅ Highlight failing grades in red
+                def highlight_failed(val):
+                    try:
+                        if float(val) < 75:
+                            return "color: red; font-weight: bold;"
+                    except:
+                        pass
+                    return ""
+
+                styled_failed = failed_df.style.applymap(highlight_failed, subset=["Grade"])
+
+                st.subheader("❌ Subjects with Failing Grades")
+                st.dataframe(styled_failed, use_container_width=True)
         with tab3:
+            st.markdown("""
+            **Comparison Legend:**  
+            🟢  : Above Average  🔵  : Equal to Average  🔴  : Below Average
+            """)
+
             df = pd.DataFrame(grades)
-            df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
-            if "Semester" in df.columns and "SchoolYear" in df.columns:
-                grouped = df.groupby(["SchoolYear", "Semester"])
-                subjects_df = get_subjects()
-                for (sy, sem), sem_df in grouped:
-                    st.subheader(f"{sy} - Semester {sem}")
-                    if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
-                        expanded_df = pd.DataFrame({
-                            "SubjectCodes": sem_df["SubjectCodes"].explode().values,
-                            "Teacher": sem_df["Teachers"].explode().values,
-                            "Grade": sem_df["Grades"].explode().values
-                        })
-                    else:
-                        expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
-                            columns={"Teachers": "Teacher", "Grades": "Grade"}
-                        )
-                    expanded_df = expanded_df.merge(
-                        subjects_df.rename(columns={"_id": "SubjectCodes"}),
-                        on="SubjectCodes",
-                        how="left"
-                    )
-                    if "Description" not in expanded_df.columns:
-                        expanded_df["Description"] = "N/A"
-                    columns_to_show = ["SubjectCodes", "Description", "Teacher", "Grade"]
-                    expanded_df = expanded_df[[c for c in columns_to_show if c in expanded_df.columns]]
-                    st.dataframe(expanded_df, use_container_width=True)
-                    if "Grade" in expanded_df.columns:
-                        valid_grades = pd.to_numeric(expanded_df["Grade"], errors="coerce").dropna()
-                        if not valid_grades.empty:
-                            avg = valid_grades.mean()
-                            st.write(f"**Semester Average: {avg:.2f}**")
-                        else:
-                            st.write("**Semester Average: N/A**")
-                    st.markdown("---")
+
+            # Explode arrays into individual rows
+            df_exploded = df.explode(["SubjectCodes", "Grades", "Teachers"]).copy()
+            df_exploded = df_exploded.rename(columns={
+                "SubjectCodes": "SubjectCode",
+                "Grades": "Grade",
+                "Teachers": "Teacher"
+            })
+
+            # Convert grades to numeric
+            df_exploded["Grade"] = pd.to_numeric(df_exploded["Grade"], errors="coerce")
+            df_exploded = df_exploded.dropna(subset=["Grade"])
+
+            # Load subjects to get Description
+            subjects_df = get_subjects()  # returns _id and Description
+            subjects_df.rename(columns={"_id": "SubjectCode"}, inplace=True)
+
+            # Merge Description
+            df_exploded = df_exploded.merge(subjects_df, on="SubjectCode", how="left")
+
+            # Compute average grade per subject across all students (format only AverageGrade)
+            subject_avg = df_exploded.groupby("SubjectCode")["Grade"].mean().reset_index()
+            subject_avg.rename(columns={"Grade": "AverageGrade"}, inplace=True)
+            subject_avg["AverageGrade"] = subject_avg["AverageGrade"].map(lambda x: f"{x:.2f}")
+
+            # Get logged-in student
+            logged_in_refid = str(st.session_state.get("user_data", {}).get("_id", "N/A"))
+            if logged_in_refid != "N/A":
+                student_df = df_exploded[df_exploded["StudentID"] == int(logged_in_refid)]
+                comparison_df = student_df.merge(subject_avg, on="SubjectCode", how="left")
+
+                # Add comparison column
+                comparison_df["Comparison"] = comparison_df.apply(
+                    lambda row: (
+                        "🟢" if row["Grade"] > float(row["AverageGrade"])
+                        else "🔵" if row["Grade"] < float(row["AverageGrade"])
+                        else "🔴"
+                    ),
+                    axis=1
+                )
+
+                # Separate by semester
+                if "SchoolYear" in comparison_df.columns and "Semester" in comparison_df.columns:
+                    grouped = comparison_df.groupby(["SchoolYear", "Semester"])
+
+                    def color_comparison(val):
+                        if val == "🟢":
+                            return "color: green; font-weight: bold;"
+                        elif val == "🔵":
+                            return "color: blue; font-weight: bold;"
+                        elif val == "🔴":
+                            return "color: red; font-weight: bold;"
+                        return ""
+
+                    for (sy, sem), group in grouped:
+                        st.subheader(f"📚 {sy} - {sem}")
+                        display_df = group[["SubjectCode", "Description", "Teacher", "Grade", "AverageGrade", "Comparison"]]
+                        styled = display_df.style.applymap(color_comparison, subset=["Comparison"])
+                        st.dataframe(styled, use_container_width=True)
+
+   
         with tab4:
             df = pd.DataFrame(grades)
             df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
