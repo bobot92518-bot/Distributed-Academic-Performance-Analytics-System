@@ -370,3 +370,37 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
     except Exception as e:
         st.error(f"Error querying students: {e}")
         return []
+
+
+
+def get_semester_from_curriculum(curriculum_year, semesters_df):
+    if not curriculum_year or curriculum_year == "" or semesters_df.empty:
+        return None
+
+    start_year, end_year = map(int, curriculum_year.split("-"))
+
+    # First semester belongs to the start year
+    first_sem = semesters_df[
+        (semesters_df["SchoolYear"] == start_year) & (semesters_df["Semester"] == "FirstSem")
+    ]
+
+    # Second semester belongs to the end year
+    second_sem = semesters_df[
+        (semesters_df["SchoolYear"] == end_year) & (semesters_df["Semester"] == "SecondSem")
+    ]
+
+    semesters_list = first_sem.to_dict("records") + second_sem.to_dict("records")
+    semesters_list = sorted(semesters_list, key=lambda x: x["SchoolYear"], reverse=True)
+    return semesters_list
+    
+def get_active_curriculum(new_curriculum):
+    if new_curriculum:
+        curriculum_df = pkl_data_to_df(curriculums_cache)
+
+        if curriculum_df is None or curriculum_df.empty:
+            return ""
+
+        curriculum_df = curriculum_df.sort_values("curriculumYear", ascending=False).head(1)
+        return curriculum_df["curriculumYear"].iloc[0]
+    else:
+        return ""

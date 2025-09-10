@@ -18,7 +18,7 @@ def compute_student_risk_analysis(is_new_curriculum, selected_semester_id = None
     semesters_df = pkl_data_to_df(semesters_cache)
     
     if grades_df.empty:
-            return []
+            return pd.DataFrame()
 
     # Expand SubjectCodes + Grades + Teachers into rows
     grades_expanded = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
@@ -70,18 +70,17 @@ def compute_student_risk_analysis(is_new_curriculum, selected_semester_id = None
         lambda r: get_risk_reason(r["Avg_Grade"], r["Failed_Subjs"]), axis=1
     )
     student_summary["Intervention Candidate"] = student_summary["Risk Reason(s)"].apply(
-        lambda x: "✅ Yes" if x != "–" else "❌ No"
+        lambda x: "⚠️ Needs Intervention" if x != "–" else "✅ On Track"
     )
 
     # Final ordered output
     return student_summary[[
-        "StudentID", "Student", "Avg_Grade","Total_Subjs", "Failed_Subjs","Failed_Subjects", "Risk Reason(s)", "Intervention Candidate", "YearLevel"
+        "StudentID", "Student", "Avg_Grade","Total_Subjs", "Failed_Subjs","Failed_Subjects", "Intervention Candidate", "YearLevel"
     ]]
     
 
 def show_faculty_tab4_info(new_curriculum):
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
-    st.title("Identify students at risk based on current semester performance.")
     semesters = get_semesters_list(new_curriculum)
     year_levels = [
         {"value": 1, "label": "1st Year"},
@@ -136,7 +135,6 @@ def show_faculty_tab4_info(new_curriculum):
                 "Total_Subjs": "Total Subjects",
                 "Failed_Subjs": "No. of Failed Subjects",
                 "Failed_Subjects": "Failed Subjects",
-                "Risk_Reasons": "Risk Reason(s)",
                 "Intervention_Candidate": "Intervention Candidate"
             })
 
@@ -152,7 +150,7 @@ def show_faculty_tab4_info(new_curriculum):
                 names='Intervention Candidate',
                 values='Count',
                 color='Intervention Candidate',
-                color_discrete_map={"✅ Yes": "Needs Intervention", "❌ Passed": "green"},
+                color_discrete_map={"⚠️ Needs Intervention": "Needs Intervention", "✅ On Track": "green"},
                 title=f"{yl_label} - Intervention Candidate Distribution"
             )
             st.plotly_chart(fig, use_container_width=True)

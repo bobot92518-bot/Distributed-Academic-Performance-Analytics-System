@@ -72,8 +72,7 @@ def show_faculty_tab3_info(new_curriculum):
         )
     with col2:
         passing_grade = st.number_input("Passing Grade", 20, 100, 75)
-    with col3:
-        top_n = st.slider("Show Top", 5, 50, 10)
+
     
     selected_semester_id = None
     if selected_semester_display != " - All Semesters - ":
@@ -114,10 +113,10 @@ def show_faculty_tab3_info(new_curriculum):
         "Failure Rate"
     ]
     
-    st.dataframe(style_failure_table(table_df[display_cols].head(top_n)), use_container_width=True, hide_index=True)
+    st.dataframe(style_failure_table(table_df[display_cols]), use_container_width=True, hide_index=True)
 
     # df["Label"] = df["SubjectCode"] + " - " + df["Description"]
-    # chart_df = df.head(top_n)[["Label", "fail_rate"]]
+    # chart_df = df[["Label", "fail_rate"]]
     # fig = px.pie(
     #     chart_df,
     #     names="Label",
@@ -134,7 +133,7 @@ def show_faculty_tab3_info(new_curriculum):
     table_df["Failure Rate %"] = table_df["Failure Rate"].str.replace("%", "").astype(float)
     # Bar chart
     fig = px.bar(
-        table_df.head(top_n),
+        table_df,
         x="Label",
         y="Failure Rate %",
         text="Failure Rate",

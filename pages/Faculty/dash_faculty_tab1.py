@@ -1,7 +1,6 @@
 import streamlit as st
 import altair as alt
 import pandas as pd 
-import matplotlib.pyplot as plt
 from global_utils import result_records_to_dataframe
 from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
 

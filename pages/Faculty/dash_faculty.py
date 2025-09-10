@@ -9,50 +9,22 @@ from pages.Faculty.dash_faculty_tab3 import show_faculty_tab3_info
 from pages.Faculty.dash_faculty_tab4 import show_faculty_tab4_info
 from pages.Faculty.dash_faculty_tab5 import show_faculty_tab5_info
 from pages.Faculty.dash_faculty_tab6 import show_faculty_tab6_info
-from global_utils import new_subjects_cache, pkl_data_to_df
+from global_utils import new_subjects_cache, pkl_data_to_df, curriculums_cache
 
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
-def show_faculty_dashboard_old():
-    """Original faculty dashboard implementation"""
-    
+def get_active_curriculum(new_curriculum):
+    if new_curriculum:
+        curriculum_df = pkl_data_to_df(curriculums_cache)
 
-def show_faculty_dashboard_new():
-    """Enhanced faculty dashboard implementation with simplified tabs"""
-    # Add version indicator
-    st.info("🆕 **New Curriculum** - Previews Records from the New Curriculum")
-    
-    st.set_page_config(
-        page_title="DAPAS - Faculty Dashboard",
-        page_icon="🏫",
-        layout="wide"
-    )
-    
-    # Simplified tabs for new version
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Class List",
-        "👥 Evaluation Sheet", 
-        "📈 Curriculum Viewer",
-        "👨‍🏫 Teacher Analysis"
-    ])
+        if curriculum_df is None or curriculum_df.empty:
+            return ""
 
-    with tab1:
-        st.subheader("📊 Class List")
-        st.markdown("This is Sample tab for New Version")
-        
-    with tab2:
-        st.subheader("👥 Evaluation Sheet")
-        st.markdown("This is Sample tab for New Version")
-        
-    with tab3:
-        st.subheader("📈 Curriculum Viewer")
-        st.markdown("This is Sample tab for New Version")
-      
-        
-    with tab4:
-        st.subheader("👨‍🏫 Teacher Analysis")
-        st.markdown("This is Sample tab for New Version")
+        curriculum_df = curriculum_df.sort_values("curriculumYear", ascending=False).head(1)
+        return f"&nbsp;&nbsp; | &nbsp;&nbsp; School Year: {curriculum_df["curriculumYear"].iloc[0]}"
+    else:
+        return ""
 
 def show_faculty_dashboard():
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
@@ -67,8 +39,7 @@ def show_faculty_dashboard():
     #     )
     new_subjects_df = pkl_data_to_df(new_subjects_cache)
     new_curriculum = not (new_subjects_df[new_subjects_df["Teacher"] == current_faculty].empty)
-    print(current_faculty)
-    print(new_curriculum)
+
     
     label = "📗 New Curriculum &nbsp; &nbsp; | &nbsp; &nbsp; School Year 2022 - 2023" if new_curriculum else "📙 Old Curriculum"
     st.write(f"Currently showing: **{label}**")
@@ -79,13 +50,15 @@ def show_faculty_dashboard():
         layout="wide"
     )
     
+    data_query_label = f"{"🔍 Data Query (LO2)" if new_curriculum else "🔍 Data Query"}"
+    
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📋 Class List",
         "📈 Class Analysis (LO1)",
         "📚 Subject Difficulty",
         "👥 At-Risk List",
         "⏳ Grade Status",
-        "🔍 Data Query"
+        f"{data_query_label}"
     ])
 
     with tab1:
@@ -101,7 +74,7 @@ def show_faculty_dashboard():
         st.subheader("👥 Students at Risk Based on Current Semester Performance")
         show_faculty_tab4_info(new_curriculum)  
     with tab5:
-        st.subheader("⏳ Grade Submission Status")
+        st.subheader(f"⏳ Grade Submission Status {get_active_curriculum(new_curriculum)}")
         show_faculty_tab5_info(new_curriculum)  
     with tab6:
         st.subheader("🔍 Custom Query Builder")
