@@ -1,6 +1,18 @@
 import streamlit as st
 import pandas as pd 
 import plotly.express as px
+import plotly.io as pio
+import matplotlib.pyplot as plt
+import tempfile
+from io import BytesIO
+from reportlab.platypus import Image
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.units import inch
+from datetime import datetime
 from global_utils import pkl_data_to_df, grades_cache, students_cache, subjects_cache, semesters_cache, new_grades_cache, new_subjects_cache
 from pages.Faculty.faculty_data_helper import get_semesters_list, get_students_from_grades
 
@@ -336,32 +348,139 @@ def show_faculty_tab4_info(new_curriculum):
                 fig.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig, use_container_width=True)
     
-    # Action items section
-    if needs_intervention > 0:
-        st.subheader("🚨 Priority Action Items")
+    if not student_df.empty:
+        pdf_bytes = generate_intervention_pdf(
+            student_df,
+            current_faculty,
+            new_curriculum,
+            selected_semester_display,
+            selected_year_level,
+            year_levels,
+            passing_grade
+        )
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        curriculum_type = "NewCurr" if new_curriculum else "OldCurr"
+        filename = f"Intervention_Candidates_List_{curriculum_type}_{timestamp}.pdf"
+        st.divider()
+        st.subheader("📄 Export Report")
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_bytes,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download Students at Risk Based on Current Semester Performance",
+            key="download_pdf_tab4" 
+        )
+    
+
+def generate_intervention_pdf(student_df, current_faculty, new_curriculum, selected_semester_display, selected_year_level, year_levels, passing_grade):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=12, leading=16))
+
+    elements = []
+
+    # Title
+    title = f"Student Risk Analysis Report ({'New Curriculum' if new_curriculum else 'Old Curriculum'})"
+    elements.append(Paragraph(title, styles["CenterHeading"]))
+    elements.append(Paragraph(f"Faculty: {current_faculty}", styles["Normal"]))
+    elements.append(Paragraph(f"Semester: {selected_semester_display}", styles["Normal"]))
+    if selected_year_level:
+        yl_label = next(item["label"] for item in year_levels if item["value"] == selected_year_level)
+        elements.append(Paragraph(f"Year Level: {yl_label}", styles["Normal"]))
+    elements.append(Paragraph(f"Passing Grade: {passing_grade}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    # Summary metrics
+    total_students = len(student_df)
+    needs_intervention = len(student_df[student_df["Intervention Candidate"] == "⚠️ Needs Intervention"])
+    on_track = len(student_df[student_df["Intervention Candidate"] == "✅ On Track"])
+    avg_grade_overall = student_df["Avg_Grade"].mean()
+
+    summary_data = [
+        ["Total Students", total_students],
+        ["Needs Intervention", f"{needs_intervention} ({needs_intervention/total_students*100:.1f}%)" if total_students > 0 else "0"],
+        ["On Track", f"{on_track} ({on_track/total_students*100:.1f}%)" if total_students > 0 else "0"],
+        ["Overall Average Grade", f"{avg_grade_overall:.1f}" if total_students > 0 else "–"],
+    ]
+    summary_table = Table(summary_data, colWidths=[200, 200])
+    summary_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 18))
+
+    # Year-level breakdown tables
+    year_levels_to_show = [selected_year_level] if selected_year_level else [1, 2, 3, 4]
+    for yl_value in year_levels_to_show:
+        group_df = student_df[student_df["YearLevel"] == yl_value]
+        if group_df.empty:
+            continue
+
+        yl_label = next(item["label"] for item in year_levels if item["value"] == yl_value)
+        elements.append(Paragraph(f"{yl_label} ({len(group_df)} students)", styles["Heading3"]))
+        elements.append(Spacer(1, 6))
+
+        display_df = group_df.rename(columns={
+            "StudentID": "Student ID",
+            "Student": "Student Name",
+            "Avg_Grade": "Avg Grade",
+            "Total_Subjs": "Total Subjects",
+            "Failed_Subjs": "No. of Failed Subjects",
+            "Failed_Subjects": "Failed Subjects",
+            "Intervention Candidate": "Status"
+        })
+
+        table_data = [list(display_df.columns)] + display_df.values.tolist()
+        table = Table(table_data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ]))
+
+        # Highlight intervention candidates
+        for row_idx, row in enumerate(table_data[1:], start=1):
+            status = row[-1]
+            if status == "⚠️ Needs Intervention":
+                table.setStyle([("TEXTCOLOR", (0, row_idx), (-1, row_idx), colors.red)])
+            elif status == "✅ On Track":
+                table.setStyle([("TEXTCOLOR", (0, row_idx), (-1, row_idx), colors.green)])
+
+        elements.append(table)
+        elements.append(Spacer(1, 12))
         
-        # Get students who need intervention
-        priority_students = student_df[student_df["Intervention Candidate"] == "⚠️ Needs Intervention"]
-        
-        # Sort by most critical (lowest avg grade, most failed subjects)
-        priority_students = priority_students.sort_values(["Avg_Grade", "Failed_Subjs"], ascending=[True, False])
-        
-        # Show top 5 most critical students
-        st.write("**Top Priority Students (Most Critical First):**")
-        top_priority = priority_students.head(5)
-        
-        for idx, row in top_priority.iterrows():
-            col_student, col_details = st.columns([1, 2])
-            
-            with col_student:
-                st.error(f"**{row['Student']}** (ID: {row['StudentID']})")
-                st.write(f"Year Level: {row['YearLevel']}")
-            
-            with col_details:
-                st.write(f"**Avg Grade:** {row['Avg_Grade']} | **Failed Subjects:** {row['Failed_Subjs']}")
-                if row['Failed_Subjects']:
-                    st.write(f"**Failed:** {row['Failed_Subjects']}")
-                st.divider()
+        # 📊 Overall pie chart
+        overall_counts = student_df['Intervention Candidate'].value_counts()
+        if not overall_counts.empty:
+            fig, ax = plt.subplots()
+            ax.pie(
+                overall_counts.values,
+                labels=overall_counts.index,
+                autopct="%1.1f%%",
+                colors=["#ff6b6b" if s == "⚠️ Needs Intervention" else "#51cf66" for s in overall_counts.index]
+            )
+            ax.set_title("Overall Intervention Status Distribution")
+            img_buf = BytesIO()
+            plt.savefig(img_buf, format="png", bbox_inches="tight")
+            plt.close(fig)
+            img_buf.seek(0)
+            elements.append(Image(img_buf, width=4*inch, height=3*inch))
+            elements.append(Spacer(1, 12))
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
 
 def style_failure_table(df):
     """Style Total Failures and Failure Rate in dark red."""

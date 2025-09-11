@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd 
 import altair as alt
 import math
+import io
+from datetime import datetime
+from reportlab.lib.pagesizes import landscape, letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 from global_utils import pkl_data_to_df, semesters_cache, result_records_to_dataframe
 from pages.Faculty.faculty_data_helper import get_semester, get_semesters_list, get_subjects_by_teacher, get_semester_from_curriculum, get_active_curriculum,get_student_grades_by_subject_and_semester, get_new_student_grades_from_db_by_subject_and_semester
 from pages.Faculty.faculty_data_manager import save_new_student_grades
@@ -237,3 +243,138 @@ def show_faculty_tab5_info(new_curriculum):
         st.warning("No students found matching the current filters.")
     else:
         st.info("👆 Select your filters and click 'Load Grades' to view student data.")
+    
+    add_generate_pdf_button(new_curriculum)
+
+    
+def add_generate_pdf_button(new_curriculum):
+    filters = st.session_state.loaded_filters if "loaded_filters" in st.session_state else {}
+    df = st.session_state.grades_df
+    
+    selected_student = None
+    if st.session_state.get("selected_student_id"):
+        selected_student = df[df["StudentID"] == st.session_state.selected_student_id].iloc[0].to_dict()
+
+    pdf_bytes = generate_grades_pdf(
+        current_faculty,
+        df,
+        filters,
+        selected_student
+    )
+
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    curriculum_type = "NewCurr" if new_curriculum else "OldCurr"
+    filename = f"Student_Grades_Submission_Status_{curriculum_type}_{timestamp}.pdf"
+
+    st.divider()
+    st.subheader("📄 Export Report")
+    st.download_button(
+        label="📄 Download PDF Report",
+        data=pdf_bytes,
+        file_name=filename,
+        mime="application/pdf",
+        type="secondary",
+        help="Download Grade Submission Status | School Year: 2022-2023",
+        key="download_pdf_tab5" 
+    )
+def generate_grades_pdf(faculty_name, df, filters, selected_student=None):
+    # Use in-memory buffer instead of saving file
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=30, rightMargin=30, topMargin=30, bottomMargin=30
+    )
+    elements = []
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=12))
+
+    # --- Title + filter info ---
+    title = "📄 Student Grades Report"
+    elements.append(Paragraph(title, styles['CenterHeading']))
+    elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
+
+    if filters:
+        sem = filters.get("semester", "All")
+        subj = filters.get("subject", "All")
+        search = filters.get("search_name", "")
+        elements.append(Paragraph(f"Semester: {sem}", styles['Normal']))
+        elements.append(Paragraph(f"Subject: {subj}", styles['Normal']))
+        if search:
+            elements.append(Paragraph(f"Search filter: {search}", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    # --- Student Grades Table ---
+    table_data = [["Student ID", "Name", "Course", "Year", "Grade", "Submission Status"]]
+    for _, row in df.iterrows():
+        year = year_map.get(row["YearLevel"], str(row["YearLevel"]))
+        grade_display = "Not Set" if pd.isna(row["grade"]) or row["grade"] == 0 else str(row["grade"])
+        grade_status = "PENDING" if pd.isna(row["grade"]) or row["grade"] == 0 else "DONE"
+        table_data.append([
+            row["StudentID"],
+            row["studentName"],
+            row["Course"],
+            year,
+            grade_display,
+            grade_status
+        ])
+
+    table = Table(table_data, repeatRows=1, hAlign="LEFT")
+    style = TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#4F81BD")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 9),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.whitesmoke, colors.lightgrey])
+    ])
+    
+    # ✅ Conditional coloring ONLY for "Submission Status" column (index = 5)
+    for i, row in enumerate(table_data[1:], start=1):  # skip header
+        status = row[5]
+        if status == "PENDING":
+            style.add("TEXTCOLOR", (5, i), (5, i), colors.red)
+            style.add("FONTNAME", (5, i), (5, i), "Helvetica-Bold")
+        elif status == "DONE":
+            style.add("TEXTCOLOR", (5, i), (5, i), colors.green)
+            style.add("FONTNAME", (5, i), (5, i), "Helvetica-Bold")
+
+    table.setStyle(style)
+    elements.append(table)
+
+    # --- Selected student details ---
+    if selected_student is not None:
+        elements.append(PageBreak())
+        elements.append(Paragraph("Selected Student Info", styles['Heading2']))
+
+        stud_grade = selected_student.get("grade")
+        grade_display = "Not Set" if pd.isna(stud_grade) or stud_grade == 0 else str(stud_grade)
+        grade_status2 = "PENDING" if pd.isna(stud_grade) or stud_grade == 0 else f"DONE"
+
+        detail_data = [
+            ["🆔 Submission Status", grade_status2],
+            ["🆔 Student ID", selected_student["StudentID"]],
+            ["👤 Name", selected_student["studentName"]],
+            ["🎓 Course", selected_student["Course"]],
+            ["📘 Year Level", year_map.get(selected_student["YearLevel"], str(selected_student["YearLevel"]))],
+            ["⭐ Grade", grade_display]
+        ]
+        detail_table = Table(detail_data, colWidths=[100, 300])
+        detail_table.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (0,-1), colors.lightgrey),
+            ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
+            ("ALIGN", (0,0), (0,-1), "RIGHT"),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("BOX", (0,0), (-1,-1), 0.25, colors.black),
+            ("INNERGRID", (0,0), (-1,-1), 0.25, colors.grey),
+        ]))
+        elements.append(detail_table)
+        
+
+    # Build PDF into buffer
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes

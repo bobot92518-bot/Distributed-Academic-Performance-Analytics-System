@@ -9,6 +9,7 @@ from pages.Faculty.dash_faculty_tab3 import show_faculty_tab3_info
 from pages.Faculty.dash_faculty_tab4 import show_faculty_tab4_info
 from pages.Faculty.dash_faculty_tab5 import show_faculty_tab5_info
 from pages.Faculty.dash_faculty_tab6 import show_faculty_tab6_info
+from pages.Faculty.dash_faculty_tab7 import show_faculty_tab7_info
 from global_utils import new_subjects_cache, pkl_data_to_df, curriculums_cache
 
 
@@ -46,15 +47,16 @@ def show_faculty_dashboard():
     )
     
     # data_query_label = f"{"🔍 Data Query (LO2)" if new_curriculum else "🔍 Data Query"}"
-    data_query_label = f"{"🔍 Data Query"}"
+    data_query_label = f"{""}"
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📋 Class List",
-        "📈 Class Analysis (LO1)",
+        "📈 Student Tracker",
         "📚 Subject Difficulty",
         "👥 At-Risk List",
         "⏳ Grade Status",
-        f"{data_query_label}"
+        "🔍 Data Query",
+        "📑 Grade Analytics"
     ])
 
     with tab1:
@@ -75,6 +77,9 @@ def show_faculty_dashboard():
     with tab6:
         st.subheader("🔍 Custom Query Builder")
         show_faculty_tab6_info(new_curriculum)  
+    with tab7:
+        st.subheader("🔍 Students Grade Analytics (LO1)")
+        show_faculty_tab7_info(new_curriculum)  
 
 if __name__ == "__main__":
     show_faculty_dashboard()

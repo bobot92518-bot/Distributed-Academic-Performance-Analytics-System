@@ -2,12 +2,21 @@ import streamlit as st
 import altair as alt
 import pandas as pd 
 import matplotlib.pyplot as plt
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.piecharts import Pie
+from reportlab.graphics.charts.textlabels import Label
+from io import BytesIO
+from datetime import datetime
 from global_utils import load_pkl_data, pkl_data_to_df, result_records_to_dataframe
 from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
-def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_filter=None, student_name_filter=None, min_grade=None, max_grade=None):
+def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_filter=None, status_filter = None, student_name_filter=None, min_grade=None, max_grade=None):
     """Display grades in Streamlit format with additional filters"""
     if df.empty:
         st.warning("No grades found for the selected criteria.")
@@ -57,10 +66,26 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
         table_data['Grade_num'] = pd.to_numeric(table_data['Grade'], errors='coerce')
         table_data['Student ID'] = table_data['Student ID'].astype(str)
         
+        
+        if status_filter is not None:
+            if status_filter == "Not Set":
+                valid_grades_by_status = (table_data['Grade_num'].isna()) | (table_data['Grade_num'] == 0)
+                table_data = table_data[valid_grades_by_status]
+
+            elif status_filter == "Failed - Below 75":
+                valid_grades_by_status = (table_data['Grade_num'].notna()) & (table_data['Grade_num'] < 75)
+                table_data = table_data[valid_grades_by_status]
+
+            elif status_filter == "Passed - Above 75":
+                valid_grades_by_status = (table_data['Grade_num'].notna()) & (table_data['Grade_num'] >= 75)
+                table_data = table_data[valid_grades_by_status]
+            
         if min_grade is not None and max_grade is not None:
             valid_grades_in_range = (table_data['Grade_num'] >= min_grade) & (table_data['Grade_num'] <= max_grade)
             no_grades = (table_data['Grade_num'].isna()) | (table_data['Grade_num'] == 0)
             table_data = table_data[valid_grades_in_range]
+        
+        
         
         if table_data.empty:
             st.info("No students match the current grade range filter.")
@@ -203,6 +228,29 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
         )
 
         st.altair_chart(pie, use_container_width=True)
+    
+    if not df.empty:
+        pdf_bytes = generate_grades_pdf(
+            current_faculty, is_new_curriculum, df,
+            semester_filter, subject_filter,status_filter, student_name_filter,
+            min_grade, max_grade
+        )
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        curriculum_type = "NewCurr" if is_new_curriculum else "OldCurr"
+        filename = f"Class_List_Custom_Query_{curriculum_type}_{timestamp}.pdf"
+
+        st.divider()
+        st.subheader("📄 Export Report")
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_bytes,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download Custom Query Build",
+            key="download_pdf_tab6" 
+        )
 
 def show_faculty_tab6_info(new_curriculum):
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
@@ -210,7 +258,7 @@ def show_faculty_tab6_info(new_curriculum):
     subjects = get_subjects_by_teacher(current_faculty, new_curriculum)
     
     # First row: Semester and Subject selection
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
         selected_semester_display = st.selectbox(
@@ -225,18 +273,25 @@ def show_faculty_tab6_info(new_curriculum):
             subject_options,
             key="tab6_subject"
         )
+    with col3:
+        subject_options = [" - All - "] + ["Passed - Above 75"] + ["Failed - Below 75"] +["Not Set"]
+        selected_grade_status = st.selectbox(
+            "📚 Student Grade Status", 
+            subject_options,
+            key="tab6_grade_status"
+        )
     
     # Second row: Student name search and grade range
-    col3, col4, col5 = st.columns([1, 1, 1])
-    with col3:
+    col4, col5, col6 = st.columns([1, 1, 1])
+    with col4:
         student_name_filter = st.text_input(
             "🔍 Search Student Name",
             placeholder="Enter student name to filter...",
             key="tab6_student_search"
         )
-    with col4:
-        min_grade = st.number_input("Min grade", value=0.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_min_grade")
     with col5:
+        min_grade = st.number_input("Min grade", value=0.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_min_grade")
+    with col6:
         max_grade = st.number_input("Max grade", value=100.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_max_grade")
     
     if max_grade < min_grade:
@@ -245,7 +300,6 @@ def show_faculty_tab6_info(new_curriculum):
     # Load button below all filters
     load_clicked = st.button("📊 Load Class", type="secondary", key="tab6_load_button")
     
-    st.markdown("---")
     # Get selected IDs
     selected_semester_id = None
     if selected_semester_display != " - All Semesters - ":
@@ -264,6 +318,7 @@ def show_faculty_tab6_info(new_curriculum):
     # Only process data when button is clicked
     if load_clicked:
         with st.spinner("Loading grades data..."):
+            st.markdown("---")
             if new_curriculum:
                 results = get_new_student_grades_by_subject_and_semester(
                     current_faculty=current_faculty, 
@@ -308,6 +363,7 @@ def show_faculty_tab6_info(new_curriculum):
                     df, 
                     selected_semester_display, 
                     selected_subject_display,
+                    selected_grade_status,
                     student_name_filter,
                     min_grade,
                     max_grade
@@ -318,3 +374,168 @@ def show_faculty_tab6_info(new_curriculum):
     else:
         # Show instruction message when no data is loaded
         st.info("👆 Click 'Load Class' to fetch and display grade data with your selected filters.")
+        
+
+def generate_grades_pdf(
+    faculty_name, is_new_curriculum, df,
+    semester_filter=None, subject_filter=None,
+    student_name_filter=None, min_grade=None, max_grade=None,
+    status_filter=None  # ✅ new
+):
+    """Generate a PDF report of student grades with summary, filters, and charts"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(letter),
+        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
+    )
+    elements = []
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='CenterHeading', alignment=1, fontSize=14, spaceAfter=10))
+    
+    # ---- Title & Metadata ----
+    title = f"Grade Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
+    elements.append(Paragraph(title, styles['CenterHeading']))
+    elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
+    if semester_filter:
+        elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
+    if subject_filter:
+        elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
+    if student_name_filter:
+        elements.append(Paragraph(f"Student Name Filter: {student_name_filter}", styles['Normal']))
+    if status_filter:
+        elements.append(Paragraph(f"Status Filter: {status_filter}", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    # ---- Prepare data ----
+    df["Grade_num"] = pd.to_numeric(df["grade"], errors="coerce")
+
+    # ✅ Apply status filter
+    if status_filter is not None:
+        if status_filter == "Not Set":
+            mask = (df["Grade_num"].isna()) | (df["Grade_num"] == 0)
+            df = df[mask]
+        elif status_filter == "Failed - Below 75":
+            mask = (df["Grade_num"].notna()) & (df["Grade_num"] < 75)
+            df = df[mask]
+        elif status_filter == "Passed - Above 75":
+            mask = (df["Grade_num"].notna()) & (df["Grade_num"] >= 75)
+            df = df[mask]
+
+    # ---- Quick stats ----
+    valid_grades = df["Grade_num"][(df["Grade_num"].notna()) & (df["Grade_num"] > 0)]
+    stats_data = [
+        ["Total Students", len(df)],
+        ["Class Average", f"{valid_grades.mean():.1f}" if not valid_grades.empty else "Not Set"],
+        ["Class Median", f"{valid_grades.median():.1f}" if not valid_grades.empty else "Not Set"],
+        ["Highest Grade", f"{valid_grades.max()}" if not valid_grades.empty else "Not Set"],
+        ["Lowest Grade", f"{valid_grades.min()}" if not valid_grades.empty else "Not Set"],
+    ]
+    stats_table = Table(stats_data, colWidths=[150, 150])
+    stats_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
+    ]))
+    elements.append(stats_table)
+    elements.append(Spacer(1, 12))
+
+    # ---- Grades table ----
+    table_data = [["Student ID", "Student Name", "Course", "Year Level", "Grade", "Pass/Fail"]]
+    for _, row in df.iterrows():
+        grade_val = pd.to_numeric(row["grade"], errors="coerce")
+        if pd.isna(grade_val) or grade_val == 0:
+            grade_display = "Not Set"
+            grade_status = "Not Set"
+        else:
+            grade_display = str(grade_val)
+            grade_status = "Passed" if grade_val >= 75 else "Failed"
+        table_data.append([
+            row.get("StudentID", ""),
+            row.get("studentName", ""),
+            row.get("Course", ""),
+            row.get("YearLevel", ""),
+            grade_display,
+            grade_status
+        ])
+
+    grade_table = Table(table_data, repeatRows=1)
+    grade_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+    ]))
+    elements.append(grade_table)
+    elements.append(Spacer(1, 12))
+
+    # ---- Charts ----
+    # Grades Summary (bar chart)
+    freq_data = df["Grade_num"].value_counts().reset_index()
+    freq_data.columns = ["Grade", "Frequency"]
+    freq_data = freq_data.sort_values("Grade")
+
+    if not freq_data.empty:
+        fig, ax = plt.subplots(figsize=(5, 3))
+        ax.bar(freq_data["Grade"], freq_data["Frequency"], color="skyblue")
+        ax.set_title("Grades Summary")
+        ax.set_xlabel("Grade")
+        ax.set_ylabel("Number of Students")
+        chart_buf = BytesIO()
+        plt.savefig(chart_buf, format="png", bbox_inches="tight")
+        plt.close(fig)
+        chart_buf.seek(0)
+        elements.append(Image(chart_buf, width=300, height=200))
+        elements.append(Spacer(1, 12))
+
+    # Pass vs Fail (bar + pie)
+    status_counts = df["Grade_num"].apply(
+        lambda g: "Not Set" if pd.isna(g) or g == 0 else ("Pass" if g >= 75 else "Fail")
+    ).value_counts().reset_index()
+    status_counts.columns = ["Status", "Count"]
+
+    if not status_counts.empty:
+        colors_map = {"Pass": "green", "Fail": "red", "Not Set": "gray"}
+
+        # Bar
+        fig, ax = plt.subplots(figsize=(4, 3))
+        ax.bar(status_counts["Status"], status_counts["Count"],
+               color=[colors_map.get(s, "blue") for s in status_counts["Status"]])
+        ax.set_title("Pass vs Fail (Bar Graph)")
+        ax.set_xlabel("Status")
+        ax.set_ylabel("Number of Students")
+        for i, val in enumerate(status_counts["Count"]):
+            ax.text(i, val + 0.2, str(val), ha="center", fontsize=9)
+        chart_buf2 = BytesIO()
+        plt.savefig(chart_buf2, format="png", bbox_inches="tight")
+        plt.close(fig)
+        chart_buf2.seek(0)
+        elements.append(Image(chart_buf2, width=250, height=200))
+        elements.append(Spacer(1, 12))
+
+        # Pie
+        fig, ax = plt.subplots(figsize=(4, 4))
+        ax.pie(
+            status_counts["Count"],
+            labels=status_counts["Status"],
+            autopct='%1.1f%%',
+            startangle=90,
+            colors=[colors_map.get(s, "blue") for s in status_counts["Status"]]
+        )
+        ax.set_title("Pass vs Fail (Pie Chart)")
+        pie_buf = BytesIO()
+        plt.savefig(pie_buf, format="png", bbox_inches="tight")
+        plt.close(fig)
+        pie_buf.seek(0)
+        elements.append(Image(pie_buf, width=250, height=250))
+
+    # ---- Build PDF ----
+    doc.build(elements)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
