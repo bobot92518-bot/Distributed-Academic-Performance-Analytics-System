@@ -16,8 +16,6 @@ from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_c
 from pages.Registrar.pdf_helper import generate_pdf 
 import time
 import json
-from fpdf import FPDF
-from io import BytesIO
 
 # Paths to Pickle Files
 students_cache = "pkl/students.pkl"
