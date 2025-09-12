@@ -26,6 +26,77 @@ year_map = {
         
 def display_grades_radio(df_students,new_curriculum):
     st.markdown("### 🎓 Student Grades")
+    
+    # --- Grade Submission Status Summary ---
+    if not df_students.empty:
+        # Get current faculty name for the header
+        current_faculty = st.session_state.get('user_data', {}).get('Name', '')
+        
+        # Calculate submission statistics
+        total_students = len(df_students)
+        submitted_grades = len(df_students[~(pd.isna(df_students['grade']) | (df_students['grade'] == 0))])
+        submission_rate = (submitted_grades / total_students * 100) if total_students > 0 else 0
+        
+        # Get unique subject information from the dataframe
+        if 'SubjectCode' in df_students.columns and 'SubjectDescription' in df_students.columns:
+            unique_subjects = df_students[['SubjectCode', 'SubjectDescription']].drop_duplicates()
+        else:
+            # Fallback if columns don't exist - try to extract from session state or use placeholder
+            unique_subjects = pd.DataFrame({
+                'SubjectCode': ['N/A'],
+                'SubjectDescription': ['Selected Subject']
+            })
+        
+        # Display header
+        st.markdown(f"**Grade Submission Status — {current_faculty}**")
+        
+        # Create summary table
+        summary_data = []
+        for _, subject_row in unique_subjects.iterrows():
+            # Filter students for this specific subject if multiple subjects
+            if len(unique_subjects) > 1:
+                subject_students = df_students[df_students['SubjectCode'] == subject_code]
+            else:
+                subject_students = df_students
+                
+            subject_total = len(subject_students)
+            subject_submitted = len(subject_students[~(pd.isna(subject_students['grade']) | (subject_students['grade'] == 0))])
+            subject_rate = (subject_submitted / subject_total * 100) if subject_total > 0 else 0
+            
+            subject_val = st.session_state.loaded_filters.get('subject', 'All')
+            subjectCode = ""
+            subjectDesc = ""
+            # Split into code and description
+            if subject_val is not None and  subject_val != "All":
+                parts = [p.strip() for p in subject_val.split('-', 1)]  # split only at the first '-'
+                subjectCode = parts[0] if len(parts) > 0 else ""
+                subjectDesc = parts[1] if len(parts) > 1 else ""
+            
+            summary_data.append({
+                'Course Code': subjectCode,
+                'Course Description': subjectDesc,
+                'Submitted Grades': subject_submitted,
+                'Total Students': subject_total,
+                'Submission Rate': f"{subject_rate:.0f}%"
+            })
+        
+        # Display as DataFrame
+        summary_df = pd.DataFrame(summary_data)
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                'Course Code': st.column_config.TextColumn('Course Code', width="medium"),
+                'Course Description': st.column_config.TextColumn('Course Description', width="large"),
+                'Submitted Grades': st.column_config.NumberColumn('Submitted Grades', width="medium"),
+                'Total Students': st.column_config.NumberColumn('Total Students', width="medium"),
+                'Submission Rate': st.column_config.TextColumn('Submission Rate', width="medium"),
+            }
+        )
+        
+        st.markdown("---")  # Add separator
+    
 
     # --- Persist selected student ---
     if "selected_student_id" not in st.session_state:
@@ -303,7 +374,14 @@ def generate_grades_pdf(faculty_name, df, filters, selected_student=None):
         textColor=colors.darkblue
     )
     styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=12))
-
+    subtitle_style = ParagraphStyle(
+        'SubtitleStyle',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=15,
+        alignment=TA_LEFT,
+        textColor=colors.darkblue
+    )
     # --- Title + filter info ---
     title = "📄 Student Grades Status Report"
     elements.append(Paragraph(title, title_style))
@@ -319,6 +397,91 @@ def generate_grades_pdf(faculty_name, df, filters, selected_student=None):
             elements.append(Paragraph(f"Search filter: {search}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
+    # --- Grade Submission Status Summary ---
+    if not df.empty:
+        elements.append(Paragraph(f"Grade Submission Status — {faculty_name}", subtitle_style))
+        
+        subject_val = st.session_state.loaded_filters.get('subject', 'All')
+        subject_code = ""
+        subject_desc = ""
+        # Split into code and description
+        if subject_val is not None and  subject_val != "All":
+            parts = [p.strip() for p in subject_val.split('-', 1)]  # split only at the first '-'
+            subject_code = parts[0] if len(parts) > 0 else ""
+            subject_desc = parts[1] if len(parts) > 1 else ""
+        
+        # Calculate submission statistics
+        # Get unique subject information from the dataframe
+        if 'SubjectCode' in df.columns and 'SubjectDescription' in df.columns:
+            unique_subjects = df[['SubjectCode', 'SubjectDescription']].drop_duplicates()
+        else:
+            # Fallback - try to extract subject info from filters or use placeholder
+            subject_from_filter = filters.get("subject", "N/A - Selected Subject")
+            if " - " in subject_from_filter:
+                code, desc = subject_from_filter.split(" - ", 1)
+            else:
+                code, desc = "N/A", subject_from_filter
+            unique_subjects = pd.DataFrame({
+                'SubjectCode': [code],
+                'SubjectDescription': [desc]
+            })
+        
+        # Create summary table
+        summary_table_data = [["Course Code", "Course Title", "Submitted Grades", "Total Students", "Submission Rate"]]
+        
+        for _, subject_row in unique_subjects.iterrows():
+            # Filter students for this specific subject if multiple subjects
+            if len(unique_subjects) > 1:
+                subject_students = df[df['SubjectCode'] == subject_code]
+            else:
+                subject_students = df
+                
+            subject_total = len(subject_students)
+            subject_submitted = len(subject_students[~(pd.isna(subject_students['grade']) | (subject_students['grade'] == 0))])
+            subject_rate = (subject_submitted / subject_total * 100) if subject_total > 0 else 0
+            
+            summary_table_data.append([
+                subject_code,
+                subject_desc,
+                str(subject_submitted),
+                str(subject_total),
+                f"{subject_rate:.0f}%"
+            ])
+
+        summary_table = Table(summary_table_data, repeatRows=1, hAlign="LEFT")
+        summary_style = TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2E8B57")),  # Sea Green header
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE", (0,0), (-1,-1), 10),
+            ("ALIGN", (0,0), (-1,-1), "CENTER"),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.lightgrey])
+        ])
+        
+        # Color code the submission rates
+        for i in range(1, len(summary_table_data)):
+            rate_text = summary_table_data[i][4]
+            rate_value = float(rate_text.replace('%', ''))
+            
+            if rate_value == 100:
+                summary_style.add("TEXTCOLOR", (4, i), (4, i), colors.green)
+                summary_style.add("FONTNAME", (4, i), (4, i), "Helvetica-Bold")
+            elif rate_value >= 80:
+                summary_style.add("TEXTCOLOR", (4, i), (4, i), colors.blue)
+                summary_style.add("FONTNAME", (4, i), (4, i), "Helvetica-Bold")
+            elif rate_value >= 50:
+                summary_style.add("TEXTCOLOR", (4, i), (4, i), colors.orange)
+                summary_style.add("FONTNAME", (4, i), (4, i), "Helvetica-Bold")
+            else:
+                summary_style.add("TEXTCOLOR", (4, i), (4, i), colors.red)
+                summary_style.add("FONTNAME", (4, i), (4, i), "Helvetica-Bold")
+
+        summary_table.setStyle(summary_style)
+        elements.append(summary_table)
+        elements.append(Spacer(1, 20))
+
+    
     # --- Student Grades Table ---
     table_data = [["Student ID", "Name", "Course", "Year", "Grade", "Submission Status"]]
     for _, row in df.iterrows():

@@ -10,6 +10,10 @@ from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.units import inch
+from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.textlabels import Label
+from reportlab.lib import colors as rl_colors
 from datetime import datetime
 from global_utils import pkl_data_to_df, subjects_cache, new_subjects_cache
 from pages.Faculty.faculty_data_helper import get_dataframe_grades, get_semesters_list
@@ -407,13 +411,141 @@ def generate_failure_pdf(df, summary_metrics, chart_fig, selected_semester_displ
     elements.append(Paragraph("Detailed Failure Rate Table", styles["Heading2"]))
     elements.append(detail_table)
     elements.append(Spacer(1, 20))
+    
+    # --- Add Bar Chart Visualization ---
+    elements.append(Paragraph("Failure Rate Visualization", styles["Heading2"]))
 
-    # --- Chart (Plotly to PNG then insert) ---
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        pio.write_image(chart_fig, tmpfile.name, format="png", scale=2, width=900, height=500)
-        chart_img = Image(tmpfile.name, width=7*inch, height=4*inch)
-        elements.append(Paragraph("Failure Rate Chart", styles["Heading2"]))
-        elements.append(chart_img)
+    # Prepare data for the chart
+    chart_data = []
+    labels = []
+    
+    for _, row in df.iterrows():
+        failure_percent = float(row["Failure Rate"].replace('%', ''))
+        chart_data.append(failure_percent)
+        # Truncate long subject codes for better display
+        subject_label = row["Subject Code"]
+        if len(subject_label) > 8:
+            subject_label = subject_label[:8] + "..."
+        labels.append(subject_label)
+    
+    # Create the drawing canvas
+    drawing = Drawing(600, 400)
+    
+    # Create vertical bar chart
+    chart = VerticalBarChart()
+    chart.x = 50
+    chart.y = 50
+    chart.width = 500
+    chart.height = 300
+    
+    # Set the data
+    chart.data = [chart_data]  # Wrap in list for single series
+    chart.categoryAxis.categoryNames = labels
+    
+    # Styling the chart
+    chart.valueAxis.valueMin = 0
+    chart.valueAxis.valueMax = max(chart_data) + 10 if chart_data else 100
+    chart.valueAxis.valueStep = 10
+
+    # Color bars
+    chart.bars.fillColor = rl_colors.HexColor("#ff6b35")
+    chart.bars.strokeColor = rl_colors.black
+    chart.bars.strokeWidth = 0.5
+
+    # Axis labels style
+    chart.categoryAxis.labels.boxAnchor = 'ne'
+    chart.categoryAxis.labels.angle = 45
+    chart.categoryAxis.labels.fontSize = 8
+    chart.categoryAxis.labels.dx = -5
+    chart.categoryAxis.labels.dy = -5
+    chart.valueAxis.labels.fontSize = 8
+
+    # --- Add chart title ---
+    title = String(300, 370, "Subject Failure Rates", fontSize=14, textAnchor='middle')
+    title.fontName = 'Helvetica-Bold'
+
+    # --- Add Y-axis label manually ---
+    y_axis_label = String(20, 200, "Failure Rate (%)", fontSize=10, angle=90)
+    y_axis_label.fontName = "Helvetica-Bold"
+
+    drawing.add(chart)
+    drawing.add(title)
+    drawing.add(y_axis_label)
+    
+    # Add the drawing to PDF elements
+    elements.append(drawing)
+    elements.append(Spacer(1, 20))
+    
+    # Add a data table showing the exact values below the chart
+    chart_values_data = [["Subject Code", "Description", "Failure Rate"]]
+    for _, row in df.iterrows():
+        chart_values_data.append([
+            row["Subject Code"],
+            row["Description"][:40] + "..." if len(row["Description"]) > 40 else row["Description"],
+            row["Failure Rate"]
+        ])
+    
+    chart_values_table = Table(chart_values_data, repeatRows=1)
+    chart_values_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ff6b35")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+    ]))
+    elements.append(Paragraph("Chart Data Values", styles["Heading3"]))
+    elements.append(chart_values_table)
+    elements.append(Spacer(1, 20))
+
+    # --- Key Insights Section ---
+    if not df.empty:
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("Key Insights", styles["Heading2"]))
+        
+        # Find subjects with highest and lowest failure rates
+        # Convert failure rate string to float for comparison
+        df_copy = df.copy()
+        df_copy['failure_rate_float'] = df_copy['Failure Rate'].str.replace('%', '').astype(float)
+        
+        highest_idx = df_copy['failure_rate_float'].idxmax()
+        lowest_idx = df_copy['failure_rate_float'].idxmin()
+        
+        highest_subject = df_copy.loc[highest_idx]
+        lowest_subject = df_copy.loc[lowest_idx]
+        
+        insights_data = [
+            ["Insight Type", "Subject Code", "Description", "Failure Rate"],
+            [
+                "Highest Failure Rate",
+                highest_subject['Subject Code'],
+                highest_subject['Description'],
+                highest_subject['Failure Rate']
+            ],
+            [
+                "Lowest Failure Rate", 
+                lowest_subject['Subject Code'],
+                lowest_subject['Description'],
+                lowest_subject['Failure Rate']
+            ]
+        ]
+        
+        insights_table = Table(insights_data, repeatRows=1)
+        insights_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#34495e")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#e74c3c")),  # Red for highest
+            ("BACKGROUND", (0, 2), (-1, 2), colors.HexColor("#27ae60")),  # Green for lowest
+            ("TEXTCOLOR", (0, 1), (-1, 2), colors.white),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, 2), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ]))
+        elements.append(insights_table)
 
     # Build PDF into buffer
     doc.build(elements)
