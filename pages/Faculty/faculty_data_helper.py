@@ -1,6 +1,7 @@
 
 import streamlit as st
 import pandas as pd
+from dbconnect import *
 from global_utils import pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache, new_subjects_cache, new_students_cache, new_grades_cache
 
 admission_year = 2023
@@ -404,3 +405,171 @@ def get_active_curriculum(new_curriculum):
         return curriculum_df["curriculumYear"].iloc[0]
     else:
         return ""
+
+def get_semester(Semester, SchoolYear):
+    semesters_df = pkl_data_to_df(semesters_cache)
+    semesters_df = semesters_df[
+        (semesters_df["Semester"] == Semester) & (semesters_df["SchoolYear"] == SchoolYear)
+    ]
+    return semesters_df
+
+
+
+
+
+
+
+
+database = db_connect()
+
+@st.cache_data(ttl=300)
+def get_new_student_grades_from_db_by_subject_and_semester(current_faculty, semester_id=None, subject_code=None):
+    try:
+        grades_col = database["new_grades"]
+        grades = grades_col.find({"SemesterID": semester_id},{})
+        grades_data = list(grades)
+        grades_df = pd.DataFrame(grades_data) if grades_data else pd.DataFrame()
+        
+        admission_year = 2022
+        # Load datasets
+        students_df = pkl_data_to_df(new_students_cache)
+        subjects_df = pkl_data_to_df(new_subjects_cache)
+        semesters_df = pkl_data_to_df(semesters_cache)
+        curriculums_df = pkl_data_to_df(curriculums_cache)
+        # grades_df = pkl_data_to_df(new_grades_cache)
+        mapping = {
+            "FirstSem": 1,
+            "SecondSem": 2,
+            "Summer": 3
+        }
+        
+        year_map = {
+        1: "1st Year",
+        2: "2nd Year",
+        3: "3rd Year",
+        4: "4th Year",
+        5: "5th Year",
+    }
+
+
+        if curriculums_df.empty or students_df.empty or subjects_df.empty or semesters_df.empty:
+            return []
+
+        # --- Step 1: Expand curriculum subjects
+        curriculum_subjects = curriculums_df.explode("subjects").reset_index(drop=True)
+        curriculum_subjects = pd.concat(
+            [curriculum_subjects.drop(columns=["subjects"]), curriculum_subjects["subjects"].apply(pd.Series)],
+            axis=1
+        )
+        
+        if subject_code is None:
+            st.warning(f"Selected Subject Not Found!")
+        
+        if semester_id is None:
+            st.warning(f"Selected Semester Not Found!")
+
+        # Filter curriculum for this subject
+        subject_curriculum = curriculum_subjects[curriculum_subjects["subjectCode"] == subject_code]
+        if subject_curriculum.empty:
+            st.warning(f"Subject {subject_code} not found in curriculum")
+            return []
+
+        subject_year = subject_curriculum["yearLevel"].iloc[0]
+        subject_sem = subject_curriculum["semester"].iloc[0]
+
+        # --- Step 2: Find the target semester info
+        semester_row = semesters_df[semesters_df["_id"] == semester_id]
+        if semester_row.empty:
+            st.warning(f"Semester ID {semester_id} not found")
+            return []
+
+        target_sy = semester_row["SchoolYear"].iloc[0]
+        target_semester = semester_row["Semester"].iloc[0]
+        target_sem = mapping.get(target_semester, 0)
+        
+        if target_sy > admission_year and not (target_sy == admission_year + 1 and target_sem == 2):
+            st.warning(f"⚠️ No student admissions have been recorded for the selected semester.")
+        
+        if target_sem != subject_sem:
+            st.warning(f"Subject not Found in this selected semester!")
+            return []
+        
+        
+        
+        studentYearLevel = 0
+        if target_sem == 1: 
+            studentYearLevel = admission_year-target_sy+subject_year
+        else:
+            studentYearLevel = admission_year-target_sy+subject_year+1
+
+        
+        if studentYearLevel <= 0 or studentYearLevel > 4:
+            print(f"Invalid Student's Year Level of {subject_year}")
+            st.warning(f"Selected Semester has No Students Enrolled for Year Level:  {year_map.get(subject_year,"")}")
+            # st.warning(f"No Students Admitted for this Year Level {subject_year}")
+            return []
+        
+        filtered_students = students_df[students_df["YearLevel"] == studentYearLevel]
+        
+        if filtered_students.empty:
+            st.warning(f"Selected Semester has No Students Enrolled for Year Level:  {year_map.get(studentYearLevel,"")}")
+            return []
+        
+        students_with_curriculum = (
+            subject_curriculum
+            .merge(filtered_students,left_on=["courseName"], right_on=["Course"],how="left")
+            .merge(subjects_df,left_on=["subjectCode"],right_on=["_id"],how="inner")
+        )
+        
+        semester_info = semester_row.head(1).to_dict("records")[0]
+        for col, val in semester_info.items():
+            if(col == "_id"):
+                students_with_curriculum["SemesterID"] = val
+            students_with_curriculum[col] = val
+        
+        students_with_curriculum = students_with_curriculum.rename(
+            columns={"_id_x": "CurriculumID", "_id_y": "StudentID", "yearLevel": "SubjectYearLevel"}
+        ).drop(columns=["courseName","_id"])
+
+        grades_flat = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
+
+        grades_flat = grades_flat.rename(columns={
+            "StudentID": "StudentID",
+            "SubjectCodes": "subjectCode",
+            "Grades": "Grade",
+            "Teachers": "Teacher"
+        }).reset_index(drop=True)
+        
+        
+        curriculum_with_grades = students_with_curriculum.merge(
+            grades_flat,
+            on=["StudentID", "subjectCode", "SemesterID"], 
+            how="left"
+        )
+        curriculum_with_grades = curriculum_with_grades.rename(
+            columns={"_id": "GradeID"}
+        )
+
+        curriculum_with_grades["Grade"] = curriculum_with_grades["Grade"].fillna("")
+        results = curriculum_with_grades[[
+            "Semester", "SchoolYear", "YearLevel", "subjectCode", "Description", "Units",
+            "Name", "Grade", "StudentID", "Course", "SubjectYearLevel"
+        ]].rename(columns={
+            "Semester": "semester",
+            "SchoolYear": "schoolYear",
+            "Description": "subjectDescription",
+            "Units": "units",
+            "Name": "studentName",
+            "Grade": "grade"
+        })
+        
+        results = results.sort_values(
+            by=["semester", "YearLevel", "subjectCode", "studentName"],
+            ascending=[True, True, True, True]
+        )
+        
+        return results.to_dict("records")
+
+    except Exception as e:
+        st.error(f"Error querying students: {e}")
+        return []

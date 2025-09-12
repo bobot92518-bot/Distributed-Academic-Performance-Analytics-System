@@ -8,7 +8,10 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
+from reportlab.lib.units import inch
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import ParagraphStyle
 
 
 # ------------------ Paths to Pickle Files ------------------ #
@@ -298,6 +301,63 @@ def show_student_dashboard_old():
 
                 st.subheader("❌ Subjects with Failing Grades")
                 st.dataframe(styled_failed, use_container_width=True)
+
+                # ---------------- PDF GENERATION ----------------
+                def generate_failed_pdf():
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    elements = []
+
+                    elements.append(Paragraph("Academic Transcript Report", styles["Title"]))
+                    elements.append(Spacer(1, 12))
+
+                    full_name = f"{student.get('Name', '')}"
+                    elements.append(Paragraph(f"<b>Student Name:</b> {full_name}", styles["Normal"]))
+                    elements.append(Paragraph(f"<b>Course:</b> {student.get('Course', 'N/A')}", styles["Normal"]))
+
+                    elements.append(Spacer(1, 12))
+                    elements.append(Paragraph("❌ Subjects with Failing Grades", styles["Heading2"]))
+                    elements.append(Spacer(1, 12))
+
+                    if failed_df.empty:
+                        elements.append(Paragraph("✅ No failing grades found.", styles["Normal"]))
+                    else:
+                        # Prepare table data
+                        data = [list(failed_df.columns)] + failed_df.astype(str).values.tolist()
+
+                        table = Table(data, repeatRows=1, colWidths=[70, 60, 70, 140, 90, 50])
+                        table.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#C00000")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                            ("FONTSIZE", (0, 0), (-1, 0), 9),
+                            ("FONTSIZE", (0, 1), (-1, -1), 8),
+                            ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                        ]))
+
+                        elements.append(table)
+
+                        elements.append(Spacer(1, 12))
+                        elements.append(Paragraph(
+                            "⚠️ Please consult with your instructor or academic advisor for guidance on retaking these subjects.",
+                            styles["Normal"]
+                        ))
+
+                    doc.build(elements)
+                    buffer.seek(0)
+                    return buffer
+
+                # ✅ Download Button
+                pdf_buffer = generate_failed_pdf()
+                st.download_button(
+                    label="📥 Download Failing Grades PDF",
+                    data=pdf_buffer,
+                    file_name="failing_grades.pdf",
+                    mime="application/pdf"
+                )
         with tab3:
             st.markdown("""
             **Comparison Legend:**  
@@ -325,7 +385,7 @@ def show_student_dashboard_old():
             # Merge Description
             df_exploded = df_exploded.merge(subjects_df, on="SubjectCode", how="left")
 
-            # Compute average grade per subject across all students (format only AverageGrade)
+            # Compute average grade per subject across all students
             subject_avg = df_exploded.groupby("SubjectCode")["Grade"].mean().reset_index()
             subject_avg.rename(columns={"Grade": "AverageGrade"}, inplace=True)
             subject_avg["AverageGrade"] = subject_avg["AverageGrade"].map(lambda x: f"{x:.2f}")
@@ -340,7 +400,7 @@ def show_student_dashboard_old():
                 comparison_df["Comparison"] = comparison_df.apply(
                     lambda row: (
                         "🟢" if row["Grade"] > float(row["AverageGrade"])
-                        else "🔵" if row["Grade"] < float(row["AverageGrade"])
+                        else "🔵" if row["Grade"] == float(row["AverageGrade"])
                         else "🔴"
                     ),
                     axis=1
@@ -364,14 +424,97 @@ def show_student_dashboard_old():
                         display_df = group[["SubjectCode", "Description", "Teacher", "Grade", "AverageGrade", "Comparison"]]
                         styled = display_df.style.applymap(color_comparison, subset=["Comparison"])
                         st.dataframe(styled, use_container_width=True)
+
+                    # ---------------- PDF GENERATION ----------------
+                    def generate_comparison_pdf():
+                        buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(buffer, pagesize=A4)
+                        styles = getSampleStyleSheet()
+                        elements = []
+
+                        elements.append(Paragraph("Grade Comparison Report", styles["Title"]))
+                        elements.append(Spacer(1, 12))
+
+                        # Student Info
+                        user_data = st.session_state.get("user_data", {})
+                        full_name = user_data.get("Name", "Unknown")
+                        elements.append(Paragraph(f"<b>Student Name:</b> {full_name}", styles["Normal"]))
+                        elements.append(Paragraph(f"<b>Reference ID:</b> {logged_in_refid}", styles["Normal"]))
+                        elements.append(Spacer(1, 12))
+
+                        # Legend
+                        elements.append(Paragraph("Legend: 🟢 Above Average | 🔵 Equal to Average | 🔴 Below Average", styles["Normal"]))
+                        elements.append(Spacer(1, 12))
+
+                        # Loop semesters
+                        for (sy, sem), group in grouped:
+                            elements.append(Paragraph(f"📚 {sy} - {sem}", styles["Heading3"]))
+                            elements.append(Spacer(1, 6))
+
+                            table_data = [list(group[["SubjectCode", "Description", "Teacher", "Grade", "AverageGrade", "Comparison"]].columns)]
+                            for _, row in group.iterrows():
+                                table_data.append([
+                                    row["SubjectCode"],
+                                    row.get("Description", "N/A"),
+                                    row.get("Teacher", "N/A"),
+                                    str(row["Grade"]),
+                                    str(row["AverageGrade"]),
+                                    row["Comparison"]
+                                ])
+
+                            # Define column widths
+                            col_widths = [60, 140, 80, 50, 60, 50]
+
+                            table = Table(table_data, repeatRows=1, colWidths=col_widths)
+                            table.setStyle(TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                                ("FONTSIZE", (0, 0), (-1, 0), 9),
+                                ("FONTSIZE", (0, 1), (-1, -1), 8),
+                                ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+                                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ]))
+
+                            elements.append(table)
+                            elements.append(Spacer(1, 12))
+
+                        # Conclusion
+                        elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                        conclusion_text = """
+                        This report compares the student's performance against the class average.
+                        🟢 means the student performed above average, 🔵 means equal to average, and 🔴 means below average.
+                        """
+                        elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
+                        doc.build(elements)
+                        buffer.seek(0)
+                        return buffer
+
+                    # ✅ Download Button
+                    pdf_buffer = generate_comparison_pdf()
+                    st.download_button(
+                        label="📥 Download Comparison PDF",
+                        data=pdf_buffer,
+                        file_name="grade_comparison.pdf",
+                        mime="application/pdf"
+                    )
+
         with tab4:
             df = pd.DataFrame(grades)
             df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
+
             if "Semester" in df.columns and "SchoolYear" in df.columns:
                 grouped = df.groupby(["SchoolYear", "Semester"])
                 subjects_df = get_subjects()
                 cols = st.columns(3)
                 i = 0
+
+                # Store figures for PDF
+                charts = []
+
                 for (sy, sem), sem_df in grouped:
                     if "SubjectCodes" in sem_df and sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
                         expanded_df = pd.DataFrame({
@@ -383,15 +526,20 @@ def show_student_dashboard_old():
                         expanded_df = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
                             columns={"Teachers": "Teacher", "Grades": "Grade"}
                         )
+
                     expanded_df = expanded_df.merge(
                         subjects_df.rename(columns={"_id": "SubjectCodes"}),
                         on="SubjectCodes",
                         how="left"
                     )
+
                     if "Description" not in expanded_df.columns:
                         expanded_df["Description"] = "N/A"
+
                     expanded_df = expanded_df[["SubjectCodes", "Description", "Teacher", "Grade"]]
                     expanded_df["Grade"] = pd.to_numeric(expanded_df["Grade"], errors="coerce")
+
+                    # Plot chart
                     fig, ax = plt.subplots(figsize=(6, 3))
                     bars = ax.bar(
                         expanded_df["SubjectCodes"],
@@ -403,13 +551,69 @@ def show_student_dashboard_old():
                     ax.set_xlabel("Subjects")
                     ax.set_title(f"{sy} - Sem {sem}")
                     plt.xticks(rotation=45, ha="right")
+
+                    # Add grade labels
                     for bar, grade in zip(bars, expanded_df["Grade"]):
                         ax.text(bar.get_x() + bar.get_width() / 3, bar.get_height() + 1,
                                 f"{grade:.0f}", ha="center", fontsize=8)
+
                     with cols[i % 3]:
                         st.pyplot(fig)
                     i += 1
-    
+
+                    # Save chart image for PDF
+                    img_buf = io.BytesIO()
+                    plt.savefig(img_buf, format="PNG", bbox_inches="tight")
+                    img_buf.seek(0)
+                    charts.append((f"{sy} - Semester {sem}", img_buf))
+                    plt.close(fig)
+
+                # ---------------- PDF GENERATION ----------------
+                def generate_visualization_pdf():
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    elements = []
+
+                    elements.append(Paragraph("Grade Visualization Report", styles["Title"]))
+                    elements.append(Spacer(1, 12))
+
+                    # Student Info
+                    user_data = st.session_state.get("user_data", {})
+                    full_name = user_data.get("Name", "Unknown")
+                    ref_id = str(user_data.get("_id", "N/A"))
+                    elements.append(Paragraph(f"<b>Student Name:</b> {full_name}", styles["Normal"]))
+                    elements.append(Paragraph(f"<b>Reference ID:</b> {ref_id}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                    # Insert each chart per semester
+                    for title, img_buf in charts:
+                        elements.append(Paragraph(title, styles["Heading3"]))
+                        elements.append(Spacer(1, 6))
+                        elements.append(Image(img_buf, width=450, height=220))  # Scale image
+                        elements.append(Spacer(1, 12))
+
+                    # Conclusion
+                    elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                    elements.append(Paragraph(
+                        "This visualization highlights the student’s performance per subject. "
+                        "Green bars indicate passing grades, while red bars indicate failing grades.",
+                        styles["Normal"]
+                    ))
+
+                    doc.build(elements)
+                    buffer.seek(0)
+                    return buffer
+
+                # ✅ Download Button
+                pdf_buffer = generate_visualization_pdf()
+                st.download_button(
+                    label="📥 Download Grade Visualization PDF",
+                    data=pdf_buffer,
+                    file_name="grade_visualization.pdf",
+                    mime="application/pdf"
+                )
+
 # ------------------ New Dashboard ------------------ #
 def show_student_dashboard_new():
     st.info("🆕 New Version - Enhanced student dashboard with improved features")
@@ -601,23 +805,128 @@ def show_student_dashboard_new():
                     styles = getSampleStyleSheet()
                     elements = []
 
+                   # --- Load student info ---
+                    students = pd.read_pickle("pkl/new_students.pkl")
+                    students_df = pd.DataFrame(students)
+
+                    # Match logged-in student
+                    student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+
+                    if not student_info.empty:
+                        course = student_info.iloc[0].get("Course", "N/A")
+                        year_level = student_info.iloc[0].get("YearLevel", "N/A")
+                    else:
+                        course = user_data.get("Course", "N/A")
+                        year_level = user_data.get("YearLevel", "N/A")
+
                     # --- Student Info ---
                     elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
                     elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
-                    elements.append(Paragraph(f"Course: {user_data.get('Course', 'N/A')}", styles["Normal"]))
-                    elements.append(Paragraph(f"Year Level: {user_data.get('YearLevel', 'N/A')}", styles["Normal"]))
-
-                    if semester_avgs:
-                        total_avg = sum(v for _, v in semester_avgs) / len(semester_avgs)
-                        elements.append(Paragraph(f"Total Average: {total_avg:.2f}", styles["Normal"]))
+                    elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
+                    elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
                     elements.append(Spacer(1, 12))
+                    # --- General Grade Summary ---
+                    if not all_grades.empty:
+                        elements.append(Paragraph("📊 General Grade Summary", styles["Heading3"]))
+                        summary_data = [["MEAN", "MEDIAN", "HIGHEST", "LOWEST"]] + [
+                            [f"{all_grades.mean():.2f}", f"{all_grades.median():.2f}", f"{all_grades.max():.2f}", f"{all_grades.min():.2f}"]
+                        ]
+                        table = Table(summary_data, hAlign="LEFT")
+                        table.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.gray),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.black)
+                        ]))
+                        elements.append(table)
+                        elements.append(Spacer(1, 12))
 
-                    # (rest of PDF code here...)
+                   # --- Transcript Data ---
+                    elements.append(Paragraph("📚 Grades by Semester", styles["Heading3"]))
+
+                    # Define a style for wrapped text
+                    wrap_style = ParagraphStyle(
+                        name="wrap_style",
+                        fontSize=7,
+                        leading=8
+                    )
+
+                    for sem, sem_df in transcript_data.items():
+                        elements.append(Paragraph(f"<b>{sem}</b>", styles["Heading4"]))
+
+                        # Convert dataframe to list of lists for PDF with wrapping
+                        table_data = [sem_df.columns.tolist()]
+                        for row in sem_df.astype(str).values.tolist():
+                            wrapped_row = [
+                                Paragraph(cell, wrap_style) if i in [1, 3] else Paragraph(cell, wrap_style)
+                                for i, cell in enumerate(row)
+                            ]
+                            table_data.append(wrapped_row)
+
+                        # ✅ Set smaller fixed widths so table fits A4
+                        col_widths = [0.8*inch, 2.0*inch, 0.6*inch, 1.6*inch, 0.6*inch, 0.8*inch]
+
+                        table = Table(table_data, repeatRows=1, hAlign="LEFT", colWidths=col_widths)
+                        table.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7),
+                        ]))
+                        elements.append(table)
+                        elements.append(Spacer(1, 6))
+
+                        # Add semester average + units
+                        avg = semester_avgs[[s for s, _ in semester_avgs].index(sem)][1]
+                        total_units = pd.to_numeric(sem_df["UNITS"], errors="coerce").fillna(0).sum()
+                        elements.append(Paragraph(f"Semester Average: {avg:.2f}", styles["Normal"]))
+                        elements.append(Paragraph(f"Total Units: {int(total_units)}", styles["Normal"]))
+                        elements.append(Spacer(1, 12))
+                        
+                    # --- Line Graph of Semester Averages ---
+                    if semester_avgs:
+                        fig, ax = plt.subplots(figsize=(6, 2.5))
+                        semester_labels, semester_values = zip(*semester_avgs)
+                        overall_avg = sum(semester_values) / len(semester_values)
+                        semester_labels = list(semester_labels) + ["Final Average"]
+                        semester_values = list(semester_values) + [overall_avg]
+
+                        ax.plot(semester_labels, semester_values, linestyle="-", color="gray")
+                        for i, value in enumerate(semester_values):
+                            color = "red" if value < 75 else "blue"
+                            ax.scatter(i, value, color=color)
+                            ax.text(i, value + 1, f"{value:.1f}", ha="center", fontsize=6, color=color)
+                        ax.set_ylim(1, 100)
+                        ax.set_title("📈 Semester & Final Average", fontsize=9)
+                        plt.xticks(rotation=30, ha="right", fontsize=7)
+                        ax.grid(True, linewidth=0.3)
+
+                        # Save plot to image
+                        img_buf = io.BytesIO()
+                        plt.savefig(img_buf, format="PNG", bbox_inches="tight", dpi=120)
+                        plt.close(fig)
+                        img_buf.seek(0)
+                        elements.append(Image(img_buf, width=400, height=150))
+                        elements.append(Spacer(1, 12))
+                          # --- Conclusion Section ---
+                        elements.append(Spacer(1, 24))  # add space before conclusion
+
+                        conclusion_text = """
+                        The transcript above reflects the academic performance of the student across all recorded semesters. 
+                        Overall averages and subject-specific grades provide a clear summary of achievements and areas of improvement. 
+                        This record is generated directly from the student database and may be used for academic monitoring, advising, 
+                        and progress evaluation.
+                        """
+
+                        elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
 
                     doc.build(elements)
                     buffer.seek(0)
                     return buffer
-
+              
                 pdf_buffer = generate_pdf()
                 st.download_button(
                     label="📄 Download Transcript PDF",
@@ -688,6 +997,96 @@ def show_student_dashboard_new():
 
                 st.subheader("❌ All Failed Subjects")
                 st.dataframe(styled_failed, use_container_width=True)
+                # --- 📄 Generate PDF for Failed Subjects ---
+                def generate_failed_pdf():
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    elements = []
+
+                    # --- Load student info ---
+                    students = pd.read_pickle("pkl/new_students.pkl")
+                    students_df = pd.DataFrame(students)
+
+                    # Match logged-in student
+                    student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+
+                    if not student_info.empty:
+                        course = student_info.iloc[0].get("Course", "N/A")
+                        year_level = student_info.iloc[0].get("YearLevel", "N/A")
+                    else:
+                        course = user_data.get("Course", "N/A")
+                        year_level = user_data.get("YearLevel", "N/A")
+
+                    # --- Student Info ---
+                    elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
+                    elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
+                    elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
+                    elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                    # --- Table ---
+                    table_data = [failed_df.columns.tolist()] + failed_df.astype(str).values.tolist()
+
+                    # Wrap subject names so they don’t overflow
+
+                    wrap_style = ParagraphStyle("wrap_style", fontSize=6, leading=7)
+
+                    for i in range(1, len(table_data)):  # skip header row
+                        table_data[i][3] = Paragraph(table_data[i][3], wrap_style)  # SUBJECTNAME col
+
+                    # Calculate dynamic column widths to fit page
+                    page_width = doc.width
+                    col_widths = [
+                        page_width * 0.1,  # SCHOOLYEAR
+                        page_width * 0.1,  # SEMESTER
+                        page_width * 0.1,  # SUBJECTCODE
+                        page_width * 0.28, # SUBJECTNAME (widest)
+                        page_width * 0.07, # UNITS
+                        page_width * 0.17, # TEACHER
+                        page_width * 0.08, # GRADE
+                        page_width * 0.1,  # STATUS
+                    ]
+
+                    table = Table(
+                        table_data,
+                        repeatRows=1,
+                        hAlign="LEFT",
+                        colWidths=col_widths
+                    )
+
+                    table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.red),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+                        ("FONTSIZE", (0, 0), (-1, -1), 6),  # smaller text to fit
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ]))
+
+                    elements.append(table)
+                    elements.append(Spacer(1, 12))
+
+                    # --- Conclusion ---
+                    elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                    conclusion_text = """
+                    The above list summarizes all subjects where the student received a failing grade (< 75). 
+                    This information can be used to identify areas for improvement and for academic advising.
+                    """
+                    elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
+                    # Build PDF
+                    doc.build(elements)
+                    buffer.seek(0)
+                    return buffer
+
+                pdf_failed_buffer = generate_failed_pdf()
+                st.download_button(
+                    label="📄 Download Failed Subjects PDF",
+                    data=pdf_failed_buffer,
+                    file_name=f"{logged_in_name}_Failed_Subjects.pdf",
+                    mime="application/pdf"
+                )
             else:
                 st.success("✅ No failed subjects found!")
     with tab3:
@@ -695,7 +1094,8 @@ def show_student_dashboard_new():
             **Comparison Legend:**  
             🟢  : Above Average  🔵  : Equal to Average  🔴  : Below Average
             """)
-    # --- Get logged-in student ---
+
+        # --- Get logged-in student ---
         user_data = st.session_state.get("user_data", {})
         logged_in_refid = str(user_data.get("_id", "N/A"))
         logged_in_name = user_data.get("Name", "Unknown User")
@@ -723,7 +1123,7 @@ def show_student_dashboard_new():
                 .reset_index()
                 .rename(columns={"Grade": "ClassAverage"})
             )
-            subject_avg_df["ClassAverage"] = subject_avg_df["ClassAverage"].round(2)  # ✅ 2 decimals only
+            subject_avg_df["ClassAverage"] = subject_avg_df["ClassAverage"].round(2)
 
             # ✅ Filter for logged-in student only
             student_grades_df = grades_df[grades_df["StudentID"] == int(logged_in_refid)]
@@ -758,6 +1158,9 @@ def show_student_dashboard_new():
                     else pd.DataFrame(columns=["subjectCode", "subjectName", "units"])
                 )
 
+                # ✅ Store semester-wise tables for PDF later
+                semester_comparison = {}
+
                 # --- Group by SchoolYear + Semester ---
                 if "SchoolYear" in student_grades_df.columns and "Semester" in student_grades_df.columns:
                     grouped = student_grades_df.groupby(["SchoolYear", "Semester"])
@@ -786,149 +1189,340 @@ def show_student_dashboard_new():
                         ).drop(columns=["subjectCode"])
 
                         # ✅ Merge with class average per subject
-                        expanded = expanded.merge(
-                            subject_avg_df,
-                            on="SubjectCode",
-                            how="left"
-                        )
+                        expanded = expanded.merge(subject_avg_df, on="SubjectCode", how="left")
 
                         # ✅ Add comparison column
                         expanded["Comparison"] = expanded.apply(
                             lambda row: (
-                                "🟢" if row["Grade"] > row["ClassAverage"]
-                                else "🔵 " if row["Grade"] == row["ClassAverage"]
-                                else "🔴 "
+                                "🟢 Above Average" if row["Grade"] > row["ClassAverage"]
+                                else "🔵 Equal To Average " if row["Grade"] == row["ClassAverage"]
+                                else "🔴 Below Average "
                             ),
                             axis=1
                         )
 
                         # ✅ Reorder columns
                         expanded = expanded[["SubjectCode", "subjectName", "units", "Teacher", "Grade", "ClassAverage", "Comparison"]]
-
-                        # ✅ Rename to ALL CAPS
                         expanded.rename(columns=str.upper, inplace=True)
+
+                        # ✅ Save for PDF
+                        semester_comparison[f"{sy} - {sem}"] = expanded.copy()
 
                         # Show table
                         st.dataframe(expanded, use_container_width=True)
+
+                # --- 📄 Generate PDF function ---
+                def generate_comparison_pdf():
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    elements = []
+
+                    # --- Load student info ---
+                    students = pd.read_pickle("pkl/new_students.pkl")
+                    students_df = pd.DataFrame(students)
+
+                    # Match logged-in student
+                    student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+
+                    if not student_info.empty:
+                        course = student_info.iloc[0].get("Course", "N/A")
+                        year_level = student_info.iloc[0].get("YearLevel", "N/A")
+                    else:
+                        course = user_data.get("Course", "N/A")
+                        year_level = user_data.get("YearLevel", "N/A")
+
+                    # --- Student Info ---
+                    elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
+                    elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
+                    elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
+                    elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+                    # --- Custom wrap style for subject names ---
+                    wrap_style = ParagraphStyle(name="Wrap", fontSize=6, leading=7, alignment=1)  # alignment=1 = center
+
+                    # --- Add semester tables ---
+                    for sem, sem_df in semester_comparison.items():
+                        elements.append(Paragraph(f"<b>{sem}</b>", styles["Heading3"]))
+
+                        # Convert subject names to Paragraphs for wrapping
+                        sem_df = sem_df.copy()
+                        sem_df["SUBJECTNAME"] = sem_df["SUBJECTNAME"].apply(
+                            lambda x: Paragraph(str(x), wrap_style)
+                        )
+
+                        # Convert dataframe to list of lists
+                        table_data = [sem_df.columns.tolist()] + sem_df.values.tolist()
+
+                        # Column widths to fit page
+                        page_width = doc.width
+                        col_widths = [
+                            page_width * 0.12,  # SubjectCode
+                            page_width * 0.28,  # SubjectName (wrapped)
+                            page_width * 0.08,  # Units
+                            page_width * 0.18,  # Teacher
+                            page_width * 0.1,   # Grade
+                            page_width * 0.12,  # ClassAverage
+                            page_width * 0.12,  # Comparison
+                        ]
+
+                        table = Table(table_data, repeatRows=1, hAlign="LEFT", colWidths=col_widths)
+                        table.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.gray),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+                            ("FONTSIZE", (0, 0), (-1, -1), 6),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ]))
+                        elements.append(table)
+                        elements.append(Spacer(1, 10))
+
+                    # --- Conclusion ---
+                    conclusion_text = """
+                    This comparison highlights how the student’s performance compares with the overall class average 
+                    for each subject. 🟢 indicates above average, 🔵 equal to average, and 🔴 below average.
+                    """
+                    elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                    elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
+                    doc.build(elements)
+                    buffer.seek(0)
+                    return buffer
+
+                # --- Add Download Button ---
+                pdf_buffer = generate_comparison_pdf()
+                st.download_button(
+                    label="📄 Download Comparison PDF",
+                    data=pdf_buffer,
+                    file_name=f"{logged_in_name}_Comparison.pdf",
+                    mime="application/pdf"
+                )
+
         except Exception as e:
             st.error(f"Error: {e}")
     with tab4:
-            user_data = st.session_state.get("user_data", {})
-            logged_in_refid = str(user_data.get("_id", "N/A"))
-            logged_in_name = user_data.get("Name", "Unknown User")
+        user_data = st.session_state.get("user_data", {})
+        logged_in_refid = str(user_data.get("_id", "N/A"))
+        logged_in_name = user_data.get("Name", "Unknown User")
 
-            try:
-                # --- Load grades ---
-                new_grades = pd.read_pickle("pkl/new_grades.pkl")
-                grades_df = pd.DataFrame(new_grades)
+        try:
+            # --- Load grades ---
+            new_grades = pd.read_pickle("pkl/new_grades.pkl")
+            grades_df = pd.DataFrame(new_grades)
 
-                # ✅ Filter for logged-in student
-                grades_df = grades_df[grades_df["StudentID"] == int(logged_in_refid)]
+            # ✅ Filter for logged-in student
+            grades_df = grades_df[grades_df["StudentID"] == int(logged_in_refid)]
 
-                if grades_df.empty:
-                    st.info("No grades found for this student.")
-                else:
-                    # --- Load semester table ---
-                    semesters = pd.read_pickle("pkl/semesters.pkl")
-                    semesters_df = pd.DataFrame(semesters)
+            if grades_df.empty:
+                st.info("No grades found for this student.")
+            else:
+                # --- Load semester table ---
+                semesters = pd.read_pickle("pkl/semesters.pkl")
+                semesters_df = pd.DataFrame(semesters)
 
-                    # ✅ Merge semester info (SemesterID ↔ _id)
-                    grades_df = grades_df.merge(
-                        semesters_df,
-                        left_on="SemesterID",
-                        right_on="_id",
-                        how="left"
+                # ✅ Merge semester info (SemesterID ↔ _id)
+                grades_df = grades_df.merge(
+                    semesters_df,
+                    left_on="SemesterID",
+                    right_on="_id",
+                    how="left"
+                )
+
+                # Drop unused columns
+                grades_df = grades_df.drop(columns=["_id", "StudentID"], errors="ignore")
+
+                # --- Load curriculum subjects ---
+                curriculums = pd.read_pickle("pkl/curriculums.pkl")
+                if isinstance(curriculums, pd.DataFrame):
+                    curriculums = curriculums.to_dict(orient="records")
+
+                # Flatten all subjects from curriculum into one DataFrame
+                all_subjects = []
+                for curriculum in curriculums:
+                    for subj in curriculum.get("subjects", []):
+                        all_subjects.append(subj)
+                subjects_df = (
+                    pd.DataFrame(all_subjects)
+                    if all_subjects
+                    else pd.DataFrame(columns=["subjectCode", "subjectName", "units"])
+                )
+
+                # --- Group by SchoolYear + Semester ---
+                if "SchoolYear" in grades_df.columns and "Semester" in grades_df.columns:
+                    grouped = list(grades_df.groupby(["SchoolYear", "Semester"]))
+
+                    st.subheader("75 Above is The Passing Grade✅ ")
+                    st.subheader("🟦 PASSED || 🟥 FAILED")
+
+                    # --- Process in chunks of 3 semesters per row ---
+                    for i in range(0, len(grouped), 3):
+                        cols = st.columns(3)
+
+                        for j, (sy_sem, sem_df) in enumerate(grouped[i:i+3]):
+                            sy, sem = sy_sem
+                            with cols[j]:
+                                st.subheader(f"📚 {sy} - {sem}")
+
+                                # Expand subjects + grades
+                                if sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                                    expanded = pd.DataFrame({
+                                        "SubjectCode": sem_df["SubjectCodes"].explode().values,
+                                        "Grade": sem_df["Grades"].explode().values
+                                    })
+                                else:
+                                    expanded = sem_df[["SubjectCodes", "Grades"]].rename(
+                                        columns={"SubjectCodes": "SubjectCode", "Grades": "Grade"}
+                                    )
+
+                                # ✅ Merge with curriculum subjects for names
+                                expanded = expanded.merge(
+                                    subjects_df[["subjectCode", "subjectName"]],
+                                    left_on="SubjectCode",
+                                    right_on="subjectCode",
+                                    how="left"
+                                ).drop(columns=["subjectCode"])
+
+                                expanded["Grade"] = pd.to_numeric(expanded["Grade"], errors="coerce")
+
+                                # --- 📊 Bar chart ---
+                                fig, ax = plt.subplots(figsize=(4, 3), dpi=120)
+                                colors_list = ["red" if g < 75 else "blue" for g in expanded["Grade"]]
+
+                                bars = ax.bar(expanded["SubjectCode"], expanded["Grade"], color=colors_list, zorder=2)
+
+                                # Add labels on top
+                                for bar, value in zip(bars, expanded["Grade"]):
+                                    ax.text(
+                                        bar.get_x() + bar.get_width() / 2,
+                                        bar.get_height() + 1,
+                                        f"{value:.0f}",
+                                        ha="center",
+                                        va="bottom",
+                                        fontsize=7,
+                                        color="black"
+                                    )
+
+                                ax.set_ylim(1, 100)
+                                ax.set_title(f"{sy} {sem}", fontsize=9)
+                                ax.set_xlabel("Subjects", fontsize=7)
+                                ax.set_ylabel("Grade", fontsize=7)
+                                ax.tick_params(axis="both", labelsize=6)
+                                ax.grid(True, axis="y", linewidth=0.3, zorder=1)
+                                plt.xticks(rotation=45, ha="right", fontsize=6)
+
+                                st.pyplot(fig, use_container_width=True)
+
+                    # --- 📄 Generate PDF function for Tab4 ---
+                    def generate_pass_fail_pdf():
+                        buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(buffer, pagesize=A4)
+                        styles = getSampleStyleSheet()
+                        elements = []
+
+                        # --- Load student info ---
+                        students = pd.read_pickle("pkl/new_students.pkl")
+                        students_df = pd.DataFrame(students)
+
+                        # Match logged-in student
+                        student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+
+                        if not student_info.empty:
+                            course = student_info.iloc[0].get("Course", "N/A")
+                            year_level = student_info.iloc[0].get("YearLevel", "N/A")
+                        else:
+                            course = user_data.get("Course", "N/A")
+                            year_level = user_data.get("YearLevel", "N/A")
+
+                        # --- Student Info ---
+                        elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
+                        elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
+                        elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
+                        elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
+                        elements.append(Spacer(1, 12))
+
+                        # --- Loop over semesters and create charts ---
+                        for (sy, sem), sem_df in grouped:
+                            elements.append(Paragraph(f"<b>{sy} - {sem}</b>", styles["Heading3"]))
+
+                            # Expand grades
+                            if sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                                expanded = pd.DataFrame({
+                                    "SubjectCode": sem_df["SubjectCodes"].explode().values,
+                                    "Grade": sem_df["Grades"].explode().values
+                                })
+                            else:
+                                expanded = sem_df[["SubjectCodes", "Grades"]].rename(
+                                    columns={"SubjectCodes": "SubjectCode", "Grades": "Grade"}
+                                )
+
+                            expanded = expanded.merge(
+                                subjects_df[["subjectCode", "subjectName"]],
+                                left_on="SubjectCode",
+                                right_on="subjectCode",
+                                how="left"
+                            ).drop(columns=["subjectCode"])
+
+                            expanded["Grade"] = pd.to_numeric(expanded["Grade"], errors="coerce")
+
+                            # --- Generate matplotlib chart ---
+                            fig, ax = plt.subplots(figsize=(4, 3), dpi=120)
+                            colors_list = ["red" if g < 75 else "blue" for g in expanded["Grade"]]
+
+                            bars = ax.bar(expanded["SubjectCode"], expanded["Grade"], color=colors_list, zorder=2)
+
+                            for bar, value in zip(bars, expanded["Grade"]):
+                                ax.text(
+                                    bar.get_x() + bar.get_width() / 2,
+                                    bar.get_height() + 1,
+                                    f"{value:.0f}",
+                                    ha="center",
+                                    va="bottom",
+                                    fontsize=7,
+                                    color="black"
+                                )
+
+                            ax.set_ylim(1, 100)
+                            ax.set_title(f"{sy} {sem}", fontsize=9)
+                            ax.set_xlabel("Subjects", fontsize=7)
+                            ax.set_ylabel("Grade", fontsize=7)
+                            ax.tick_params(axis="both", labelsize=6)
+                            ax.grid(True, axis="y", linewidth=0.3, zorder=1)
+                            plt.xticks(rotation=45, ha="right", fontsize=6)
+
+                            # Save chart to buffer
+                            img_buffer = io.BytesIO()
+                            plt.savefig(img_buffer, format="PNG", bbox_inches="tight")
+                            plt.close(fig)
+                            img_buffer.seek(0)
+
+                            # Insert chart into PDF
+                            elements.append(Image(img_buffer, width=400, height=250))
+                            elements.append(Spacer(1, 12))
+
+                        # --- Conclusion ---
+                        conclusion_text = """
+                        This report summarizes the student’s performance per semester. 
+                        Bars in 🟦 blue represent passed grades (≥75), while 🟥 red indicate failed grades (<75).
+                        """
+                        elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                        elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
+                        doc.build(elements)
+                        buffer.seek(0)
+                        return buffer
+
+                    # --- 📌 Add download button in Tab4 ---
+                    pdf_buffer = generate_pass_fail_pdf()
+                    st.download_button(
+                        "📥 Download PDF Report",
+                        data=pdf_buffer,
+                        file_name=f"{logged_in_name}_PassFail_Report.pdf",
+                        mime="application/pdf"
                     )
 
-                    # Drop unused columns
-                    grades_df = grades_df.drop(columns=["_id", "StudentID"], errors="ignore")
-
-                    # --- Load curriculum subjects ---
-                    curriculums = pd.read_pickle("pkl/curriculums.pkl")
-                    if isinstance(curriculums, pd.DataFrame):
-                        curriculums = curriculums.to_dict(orient="records")
-
-                    # Flatten all subjects from curriculum into one DataFrame
-                    all_subjects = []
-                    for curriculum in curriculums:
-                        for subj in curriculum.get("subjects", []):
-                            all_subjects.append(subj)
-                    subjects_df = (
-                        pd.DataFrame(all_subjects)
-                        if all_subjects
-                        else pd.DataFrame(columns=["subjectCode", "subjectName", "units"])
-                    )
-
-                    # --- Group by SchoolYear + Semester ---
-                    if "SchoolYear" in grades_df.columns and "Semester" in grades_df.columns:
-                        grouped = list(grades_df.groupby(["SchoolYear", "Semester"]))
-
-                        st.subheader("75 Above is The Passing Grade✅ ")
-                        st.subheader("🟦 PASSED || 🟥 FAILED")
-
-                        # --- Process in chunks of 3 semesters per row ---
-                        for i in range(0, len(grouped), 3):
-                            cols = st.columns(3)
-
-                            for j, (sy_sem, sem_df) in enumerate(grouped[i:i+3]):
-                                sy, sem = sy_sem
-                                with cols[j]:
-                                    st.subheader(f"📚 {sy} - {sem}")
-
-                                    # Expand subjects + grades
-                                    if sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
-                                        expanded = pd.DataFrame({
-                                            "SubjectCode": sem_df["SubjectCodes"].explode().values,
-                                            "Grade": sem_df["Grades"].explode().values
-                                        })
-                                    else:
-                                        expanded = sem_df[["SubjectCodes", "Grades"]].rename(
-                                            columns={"SubjectCodes": "SubjectCode", "Grades": "Grade"}
-                                        )
-
-                                    # ✅ Merge with curriculum subjects for names
-                                    expanded = expanded.merge(
-                                        subjects_df[["subjectCode", "subjectName"]],
-                                        left_on="SubjectCode",
-                                        right_on="subjectCode",
-                                        how="left"
-                                    ).drop(columns=["subjectCode"])
-
-                                    expanded["Grade"] = pd.to_numeric(expanded["Grade"], errors="coerce")
-
-                                    # --- 📊 Bar chart ---
-                                    fig, ax = plt.subplots(figsize=(4, 3), dpi=120)
-
-                                    colors_list = ["red" if g < 75 else "blue" for g in expanded["Grade"]]
-
-                                    bars = ax.bar(expanded["SubjectCode"], expanded["Grade"], color=colors_list, zorder=2)
-
-                                    # Add labels on top
-                                    for bar, value in zip(bars, expanded["Grade"]):
-                                        ax.text(
-                                            bar.get_x() + bar.get_width() / 2,
-                                            bar.get_height() + 1,
-                                            f"{value:.0f}",
-                                            ha="center",
-                                            va="bottom",
-                                            fontsize=7,
-                                            color="black"
-                                        )
-
-                                    ax.set_ylim(1, 100)
-                                    ax.set_title(f"{sy} {sem}", fontsize=9)
-                                    ax.set_xlabel("Subjects", fontsize=7)
-                                    ax.set_ylabel("Grade", fontsize=7)
-                                    ax.tick_params(axis="both", labelsize=6)
-                                    ax.grid(True, axis="y", linewidth=0.3, zorder=1)
-                                    plt.xticks(rotation=45, ha="right", fontsize=6)
-
-                                    st.pyplot(fig, use_container_width=True)
-
-            except Exception as e:
-                st.error(f"Error loading data: {e}")
-
-
+        except Exception as e:
+            st.error(f"Error loading data: {e}")
     with tab5:
         st.subheader("📘 Curriculum with Grades")
 
@@ -1015,6 +1609,135 @@ def show_student_dashboard_new():
                     st.dataframe(group, use_container_width=True)
 
                 st.markdown("---")
+                # --- 📄 Generate Curriculum PDF ---
+                def generate_curriculum_pdf():
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    elements = []
+
+                    # --- Load student info ---
+                    students = pd.read_pickle("pkl/new_students.pkl")
+                    students_df = pd.DataFrame(students)
+
+                    # Match logged-in student
+                    student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+
+                    if not student_info.empty:
+                        course = student_info.iloc[0].get("Course", "N/A")
+                        year_level = student_info.iloc[0].get("YearLevel", "N/A")
+                    else:
+                        course = user_data.get("Course", "N/A")
+                        year_level = user_data.get("YearLevel", "N/A")
+
+                    # --- Student Info ---
+                    elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
+                    elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
+                    elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
+                    elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
+                    elements.append(Spacer(1, 12))
+
+                    # ✅ Custom style for wrapped text
+                    from reportlab.lib.styles import ParagraphStyle
+                    from reportlab.lib.enums import TA_LEFT
+                    wrap_style = ParagraphStyle(
+                        name="TableCell",
+                        fontSize=7,
+                        leading=8,
+                        alignment=TA_LEFT
+                    )
+
+                    # ✅ Loop through each curriculum
+                    for curriculum in curriculums:
+                        elements.append(Paragraph(f"<b>Course Code:</b> {curriculum.get('courseCode', 'N/A')}", styles["Normal"]))
+                        elements.append(Paragraph(f"<b>Curriculum Year:</b> {curriculum.get('curriculumYear', 'N/A')}", styles["Normal"]))
+                        elements.append(Spacer(1, 12))
+
+                        subjects = curriculum.get("subjects", [])
+                        if not subjects:
+                            elements.append(Paragraph("No subjects found for this curriculum.", styles["Normal"]))
+                            continue
+
+                        subj_df = pd.DataFrame(subjects)
+                        subj_df['subjectCode'] = subj_df['subjectCode'].astype(str)
+
+                        merged_df = subj_df.merge(expanded_grades, on="subjectCode", how="left")
+                        merged_df['Grade'] = merged_df['Grade'].fillna("N/A")
+
+                        grouped = merged_df.groupby(["yearLevel", "semester"])
+
+                        for (year, sem), group in grouped:
+                            elements.append(Paragraph(f"📚 Year {year} - Semester {sem}", styles["Heading3"]))
+                            elements.append(Spacer(1, 6))
+
+                            # Prepare table data
+                            columns_to_show = ["subjectCode", "subjectName", "Grade", "lec", "lab", "units", "prerequisite"]
+                            group = group[[c for c in columns_to_show if c in group.columns]]
+                            group = group.rename(columns={
+                                "subjectCode": "Code",
+                                "subjectName": "Subject Name",
+                                "lec": "Lec",
+                                "lab": "Lab",
+                                "units": "Units",
+                                "prerequisite": "Prereq",
+                                "Grade": "Grade"
+                            })
+
+                            # Convert DataFrame rows → ReportLab Table rows
+                            data = [list(group.columns)]
+                            for row in group.values.tolist():
+                                # Wrap Subject Name
+                                row[1] = Paragraph(str(row[1]), wrap_style)
+                                # Wrap Prereq if exists
+                                if len(row) >= 7:
+                                    row[6] = Paragraph(str(row[6]), wrap_style)
+                                data.append(row)
+
+                            # --- Table ---
+                            table = Table(data, repeatRows=1, colWidths=[55, 160, 45, 30, 30, 35, 90])
+                            table.setStyle(TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                                ("ALIGN", (0, 0), (0, -1), "CENTER"),   # Code column center
+                                ("ALIGN", (2, 0), (-2, -1), "CENTER"),  # Numbers center
+                                ("ALIGN", (1, 1), (1, -1), "LEFT"),     # Subject names left
+                                ("ALIGN", (6, 1), (6, -1), "LEFT"),     # Prereq left
+                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                                ("FONTSIZE", (0, 0), (-1, 0), 8),
+                                ("FONTSIZE", (0, 1), (-1, -1), 7),
+                                ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+                                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ]))
+
+                            elements.append(table)
+                            elements.append(Spacer(1, 12))
+
+                        elements.append(Spacer(1, 12))
+                        elements.append(Paragraph("<hr/>", styles["Normal"]))
+
+                    # --- Conclusion ---
+                    conclusion_text = """
+                    This curriculum report shows all enrolled subjects, their corresponding grades, 
+                    and subject details (units, lecture, lab, and prerequisites). Use this as a guide 
+                    for academic progress tracking.
+                    """
+                    elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                    elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
+                    doc.build(elements)
+                    buffer.seek(0)
+                    return buffer
+
+
+                # --- 📌 Download Button ---
+                pdf_buffer = generate_curriculum_pdf()
+                st.download_button(
+                    "📥 Download Curriculum PDF",
+                    data=pdf_buffer,
+                    file_name=f"{logged_in_name}_Curriculum_Report.pdf",
+                    mime="application/pdf"
+                )
 
         except Exception as e:
             st.error(f"Error loading curriculum data: {e}")

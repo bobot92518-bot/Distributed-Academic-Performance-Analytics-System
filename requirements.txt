@@ -8,3 +8,5 @@ matplotlib>=3.8.0
 reportlab>=4.0.0
 numpy>=1.24.0
 altair
+kaleido
+seaborn

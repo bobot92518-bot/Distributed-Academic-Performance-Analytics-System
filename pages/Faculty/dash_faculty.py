@@ -9,6 +9,7 @@ from pages.Faculty.dash_faculty_tab3 import show_faculty_tab3_info
 from pages.Faculty.dash_faculty_tab4 import show_faculty_tab4_info
 from pages.Faculty.dash_faculty_tab5 import show_faculty_tab5_info
 from pages.Faculty.dash_faculty_tab6 import show_faculty_tab6_info
+from pages.Faculty.dash_faculty_tab7 import show_faculty_tab7_info
 from global_utils import new_subjects_cache, pkl_data_to_df, curriculums_cache
 
 
@@ -25,40 +26,37 @@ def get_active_curriculum(new_curriculum):
         return f"&nbsp;&nbsp; | &nbsp;&nbsp; School Year: {curriculum_df["curriculumYear"].iloc[0]}"
     else:
         return ""
-
+if "active_load" not in st.session_state:
+        st.session_state.active_load = None
+        
 def show_faculty_dashboard():
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
     """Main faculty dashboard function with toggle between old and new implementations"""
-    # Add toggle at the top left
-    # col1, col2 = st.columns([3, 1])
-    # with col1:
-    #     new_curriculum = st.toggle(
-    #         "📘 Curriculum Mode", 
-    #         value=True,
-    #         help="Switch between the old curriculum and the new curriculum"
-    #     )
+
     new_subjects_df = pkl_data_to_df(new_subjects_cache)
     new_curriculum = not (new_subjects_df[new_subjects_df["Teacher"] == current_faculty].empty)
 
     
     label = "📗 New Curriculum &nbsp; &nbsp; | &nbsp; &nbsp; School Year 2022 - 2023" if new_curriculum else "📙 Old Curriculum"
     st.write(f"Currently showing: **{label}**")
-    # Call the appropriate version based on toggle
+    
     st.set_page_config(
         page_title="DAPAS - Faculty Dashboard",
         page_icon="🏫",
         layout="wide"
     )
     
-    data_query_label = f"{"🔍 Data Query (LO2)" if new_curriculum else "🔍 Data Query"}"
+    # data_query_label = f"{"🔍 Data Query (LO2)" if new_curriculum else "🔍 Data Query"}"
+    data_query_label = f"{""}"
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📋 Class List",
-        "📈 Class Analysis (LO1)",
+        "📈 Student Tracker",
         "📚 Subject Difficulty",
         "👥 At-Risk List",
         "⏳ Grade Status",
-        f"{data_query_label}"
+        "🔍 Data Query",
+        "📑 Grade Analytics"
     ])
 
     with tab1:
@@ -79,6 +77,9 @@ def show_faculty_dashboard():
     with tab6:
         st.subheader("🔍 Custom Query Builder")
         show_faculty_tab6_info(new_curriculum)  
+    with tab7:
+        st.subheader("🔍 Students Grade Analytics (LO1)")
+        show_faculty_tab7_info(new_curriculum)  
 
 if __name__ == "__main__":
     show_faculty_dashboard()
