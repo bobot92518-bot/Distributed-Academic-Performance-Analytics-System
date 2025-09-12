@@ -21,7 +21,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
     """Generate PDF report for grades data"""
     
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, 
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, 
                           topMargin=72, bottomMargin=18)
     
     # Container for the 'Flowable' objects
@@ -56,7 +56,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
     )
     
     # Title
-    title_text = "Grade Report"
+    title_text = "Class List Report"
     if is_new_curriculum:
         title_text += " (New Curriculum)"
     else:
@@ -308,8 +308,8 @@ def add_pdf_download_button(df, faculty_name, semester_filter=None, subject_filt
         
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "NewCurr" if is_new_curriculum else "OldCurr"
-        filename = f"Grade_Report_{curriculum_type}_{timestamp}.pdf"
+        curriculum_type = "New" if is_new_curriculum else "Old"
+        filename = f"Class_List_{curriculum_type}_{timestamp}.pdf"
         
         st.download_button(
             label="📄 Download PDF Report",

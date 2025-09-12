@@ -4,8 +4,9 @@ import plotly.express as px
 import plotly.io as pio
 import tempfile
 from io import BytesIO
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.units import inch
@@ -291,7 +292,7 @@ def add_pdf_download_button(df, table_df, fig, display_cols, new_curriculum, sel
         
         # Generate filename (always ends with .pdf)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "NewCurr" if new_curriculum else "OldCurr"
+        curriculum_type = "New" if new_curriculum else "Old"
         filename = f"Subject_Difficulty_{curriculum_type}_{timestamp}.pdf"
         
         # Download button
@@ -329,16 +330,23 @@ def generate_failure_pdf(df, summary_metrics, chart_fig, selected_semester_displ
     Returns raw PDF bytes for download button.
     """
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
     elements = []
 
     styles = getSampleStyleSheet()
-    style_title = styles["Title"]
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
     
     styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=10))
 
     # --- Title Block ---
-    elements.append(Paragraph("Faculty Failure Rate Report", style_title))
+    elements.append(Paragraph("Faculty Failure Rate Report", title_style))
     elements.append(Paragraph(f"Faculty: {current_faculty}", styles['Normal']))
 
     if selected_semester_display:

@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 import tempfile
 from io import BytesIO
 from reportlab.platypus import Image
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.units import inch
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.units import inch
@@ -361,7 +362,7 @@ def show_faculty_tab4_info(new_curriculum):
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "NewCurr" if new_curriculum else "OldCurr"
+        curriculum_type = "New" if new_curriculum else "Old"
         filename = f"Intervention_Candidates_List_{curriculum_type}_{timestamp}.pdf"
         st.divider()
         st.subheader("📄 Export Report")
@@ -378,15 +379,23 @@ def show_faculty_tab4_info(new_curriculum):
 
 def generate_intervention_pdf(student_df, current_faculty, new_curriculum, selected_semester_display, selected_year_level, year_levels, passing_grade):
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,  
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
     styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=12, leading=16))
 
     elements = []
 
     # Title
     title = f"Student Risk Analysis Report ({'New Curriculum' if new_curriculum else 'Old Curriculum'})"
-    elements.append(Paragraph(title, styles["CenterHeading"]))
+    elements.append(Paragraph(title, title_style))
     elements.append(Paragraph(f"Faculty: {current_faculty}", styles["Normal"]))
     elements.append(Paragraph(f"Semester: {selected_semester_display}", styles["Normal"]))
     if selected_year_level:

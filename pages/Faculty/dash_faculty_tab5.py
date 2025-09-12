@@ -4,6 +4,7 @@ import altair as alt
 import math
 import io
 from datetime import datetime
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -251,6 +252,10 @@ def add_generate_pdf_button(new_curriculum):
     filters = st.session_state.loaded_filters if "loaded_filters" in st.session_state else {}
     df = st.session_state.grades_df
     
+    if df is None or df.empty:
+        st.info("ℹ️ Load grades first to enable PDF export.")
+        return
+    
     selected_student = None
     if st.session_state.get("selected_student_id"):
         selected_student = df[df["StudentID"] == st.session_state.selected_student_id].iloc[0].to_dict()
@@ -264,7 +269,7 @@ def add_generate_pdf_button(new_curriculum):
 
     # Generate filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    curriculum_type = "NewCurr" if new_curriculum else "OldCurr"
+    curriculum_type = "New" if new_curriculum else "Old"
     filename = f"Student_Grades_Submission_Status_{curriculum_type}_{timestamp}.pdf"
 
     st.divider()
@@ -280,6 +285,7 @@ def add_generate_pdf_button(new_curriculum):
     )
 def generate_grades_pdf(faculty_name, df, filters, selected_student=None):
     # Use in-memory buffer instead of saving file
+    
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -288,11 +294,19 @@ def generate_grades_pdf(faculty_name, df, filters, selected_student=None):
     )
     elements = []
     styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
     styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=12))
 
     # --- Title + filter info ---
-    title = "📄 Student Grades Report"
-    elements.append(Paragraph(title, styles['CenterHeading']))
+    title = "📄 Student Grades Status Report"
+    elements.append(Paragraph(title, title_style))
     elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
 
     if filters:

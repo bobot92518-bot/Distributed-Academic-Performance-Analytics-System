@@ -3,10 +3,11 @@ import altair as alt
 import pandas as pd 
 import matplotlib.pyplot as plt
 import io
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import landscape, A4
+from reportlab.lib.pagesizes import letter, landscape, A4
 from reportlab.lib.units import inch
 from datetime import datetime
 from global_utils import load_pkl_data, pkl_data_to_df, result_records_to_dataframe
@@ -21,19 +22,27 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     # Landscape PDF
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=landscape(A4),
+        pagesize=landscape(letter),
         rightMargin=20, leftMargin=20,
         topMargin=20, bottomMargin=20
     )
 
     styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
     styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=12))
 
     elements = []
 
     # Title
     title = f"Grade Analytics Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
-    elements.append(Paragraph(title, styles['CenterHeading']))
+    elements.append(Paragraph(title, title_style))
     elements.append(Paragraph(f"Teacher: {current_faculty}", styles['Normal']))
     elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
     elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
@@ -395,7 +404,7 @@ def add_grade_analytics_pdf_generator(df, is_new_curriculum, semester_filter, su
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "NewCurr" if is_new_curriculum else "OldCurr"
+        curriculum_type = "New" if is_new_curriculum else "Old"
         filename = f"Grade_Analytics_{curriculum_type}_{timestamp}.pdf"
 
         st.divider()

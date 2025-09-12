@@ -16,9 +16,17 @@ from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_b
 def create_advanced_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None, is_new_curriculum=False):
     """Generate advanced PDF report with tables and charts"""
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20, leftMargin=20, topMargin=30, bottomMargin=30)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=20, leftMargin=20, topMargin=30, bottomMargin=30)
 
     styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
     styles.add(ParagraphStyle(name="CenterHeading", fontSize=14, leading=16, alignment=TA_CENTER, spaceAfter=10))
     styles.add(ParagraphStyle(name="NormalLeft", fontSize=10, leading=12, alignment=TA_LEFT))
     styles.add(ParagraphStyle(name="TableCell", fontSize=9, leading=11, alignment=TA_LEFT, wordWrap='CJK'))  # Wrap text
@@ -26,8 +34,8 @@ def create_advanced_grade_pdf(df, faculty_name, semester_filter=None, subject_fi
     elements = []
 
     # Title
-    title = f"Grade Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
-    elements.append(Paragraph(title, styles['CenterHeading']))
+    title = f"Student Progress Tracking ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
+    elements.append(Paragraph(title, title_style))
     elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
     if semester_filter:
         elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
@@ -209,8 +217,8 @@ def add_advanced_pdf_download_button(df, faculty_name, semester_filter=None, sub
         pdf_data = create_advanced_grade_pdf(df, faculty_name, semester_filter, subject_filter, is_new_curriculum)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "NewCurr" if is_new_curriculum else "OldCurr"
-        filename = f"Advanced_Grade_Report_{curriculum_type}_{timestamp}.pdf"
+        curriculum_type = "New" if is_new_curriculum else "Old"
+        filename = f"Student_Progress_Report_{curriculum_type}_{timestamp}.pdf"
         
         st.download_button(
             label="📊 Download PDF Report",

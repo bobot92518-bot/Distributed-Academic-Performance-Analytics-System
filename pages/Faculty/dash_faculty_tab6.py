@@ -2,6 +2,7 @@ import streamlit as st
 import altair as alt
 import pandas as pd 
 import matplotlib.pyplot as plt
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
@@ -237,8 +238,8 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
         )
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "NewCurr" if is_new_curriculum else "OldCurr"
-        filename = f"Class_List_Custom_Query_{curriculum_type}_{timestamp}.pdf"
+        curriculum_type = "New" if is_new_curriculum else "Old"
+        filename = f"Custom_Query_Class_List_{curriculum_type}_{timestamp}.pdf"
 
         st.divider()
         st.subheader("📄 Export Report")
@@ -391,11 +392,19 @@ def generate_grades_pdf(
     )
     elements = []
     styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
     styles.add(ParagraphStyle(name='CenterHeading', alignment=1, fontSize=14, spaceAfter=10))
     
     # ---- Title & Metadata ----
-    title = f"Grade Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
-    elements.append(Paragraph(title, styles['CenterHeading']))
+    title = f"Student Grades Query Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
+    elements.append(Paragraph(title, title_style))
     elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
     if semester_filter:
         elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
