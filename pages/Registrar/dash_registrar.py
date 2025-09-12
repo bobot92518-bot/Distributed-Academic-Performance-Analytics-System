@@ -12,9 +12,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, teachers_cache, curriculums_cache
+from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
+from pages.Registrar.pdf_helper import generate_pdf 
 import time
 import json
+from fpdf import FPDF
+from io import BytesIO
 
 # Paths to Pickle Files
 students_cache = "pkl/students.pkl"
@@ -23,25 +26,6 @@ semesters_cache = "pkl/semesters.pkl"
 subjects_cache = "pkl/subjects.pkl"
 teachers_cache = "pkl/teachers.pkl"
 curriculums_cache = "pkl/curriculums.pkl"
-
-
-# Helper functions
-# @st.cache_data(ttl=300)  # Cache for 5 minutes
-# def load_pkl_data(cache_path):
-#     """Load data from pickle file if exists, else return empty DataFrame"""
-#     if os.path.exists(cache_path):
-#         try:
-#             data = pd.read_pickle(cache_path)
-#             # Convert list to DataFrame if needed
-#             if isinstance(data, list):
-#                 return pd.DataFrame(data)
-#             return data
-#         except Exception as e:
-#             st.error(f"Error loading {cache_path}: {str(e)}")
-#             return pd.DataFrame()
-#     else:
-#         st.warning(f"⚠️ Cache file {cache_path} not found.")
-#         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
 def load_all_data():
@@ -544,8 +528,8 @@ def show_registrar_dashboard_old():
 
     with tab1:
         st.subheader("📊 Student Academic Standing Report")
-        st.markdown("View student academic performance with GPA calculations and standing classifications")
-        
+        st.markdown("View top performers and probationary students by school year.")
+
         # Filters
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -565,11 +549,13 @@ def show_registrar_dashboard_old():
         if st.button("Apply Filters", key="academic_apply"):
             with st.spinner("Loading academic standing data..."):
                 df = get_academic_standing(data, {"Semester": semester, "Course": course, "SchoolYear": year})
+
                 if not df.empty:
-                    # Display summary statistics
+                    # === Summary Metrics ===
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Total Students", len(df))
+                        total_students = len(df)
+                        st.metric("Total Students", total_students)
                     with col2:
                         deans_list = len(df[df["Status"] == "Dean's List"])
                         st.metric("Dean's List", deans_list)
@@ -579,42 +565,48 @@ def show_registrar_dashboard_old():
                     with col4:
                         probation = len(df[df["Status"] == "Probation"])
                         st.metric("Probation", probation)
-                    
-                    # Display data table
-                    st.subheader("Academic Standing Data")
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Status distribution pie chart
-                    status_counts = df["Status"].value_counts()
-                    fig_pie = px.pie(
-                        values=status_counts.values, 
-                        names=status_counts.index,
-                        title="Academic Status Distribution",
-                        color_discrete_map={
-                            "Dean's List": "#2E8B57",
-                            "Good Standing": "#4169E1", 
-                            "Probation": "#DC143C"
-                        }
+
+                    # === TOP 10 STUDENTS PER SCHOOL YEAR ===
+                    st.subheader("🏆 Top 10 Students Per School Year")
+                    top10_per_year = (
+                        df.sort_values(["SchoolYear", "GPA"], ascending=[True, False])
+                        .groupby("SchoolYear")
+                        .head(10)
                     )
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                    
-                    # GPA distribution histogram
-                    fig_hist = px.histogram(
-                        df, 
-                        x="GPA", 
-                        nbins=20,
-                        title="GPA Distribution",
-                        labels={"GPA": "Grade Point Average", "count": "Number of Students"}
+                    st.dataframe(top10_per_year, use_container_width=True)
+
+                    # === TOP 10 PROBATIONARY STUDENTS PER SCHOOL YEAR ===
+                    st.subheader("⚠️ Top 10 Probationary Students Per School Year")
+                    top10_probation = (
+                        df[df["Status"] == "Probation"]
+                        .sort_values(["SchoolYear", "GPA"], ascending=[True, True])
+                        .groupby("SchoolYear")
+                        .head(10)
                     )
-                    fig_hist.add_vline(x=90, line_dash="dash", line_color="green", annotation_text="Dean's List (≥90)")
-                    fig_hist.add_vline(x=75, line_dash="dash", line_color="blue", annotation_text="Good Standing (≥75)")
-                    st.plotly_chart(fig_hist, use_container_width=True)
-                    
-                    # Top performers table
-                    st.subheader("Top 15 Students (by GPA)")
-                    top15 = df.nlargest(15, "GPA")[["Name", "Course", "GPA", "Status", "Semester", "SchoolYear"]]
-                    st.dataframe(top15, use_container_width=True)
-                    
+                    st.dataframe(top10_probation, use_container_width=True)
+
+                    # === PDF REPORT (INCLUDES BOTH TABLES) ===
+                    pdf_buffer = generate_pdf(
+                        title="Student Academic Standing Report",
+                        summary_metrics={
+                            "Total Students": total_students,
+                            "Dean's List": deans_list,
+                            "Good Standing": good_standing,
+                            "Probation": probation
+                        },
+                        dataframes=[
+                            ("Top 10 Students Per School Year", top10_per_year),
+                            ("Top 10 Probationary Students Per School Year", top10_probation)
+                        ]
+                    )
+
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer,
+                        file_name="academic_standing_top10_report.pdf",
+                        mime="application/pdf"
+                    )
+
                 else:
                     st.warning("No data available for the selected filters")
         else:
@@ -623,7 +615,7 @@ def show_registrar_dashboard_old():
     with tab2:
         st.subheader("📈 Subject Pass/Fail Distribution")
         st.markdown("Analyze pass/fail rates by subject with detailed breakdowns and visualizations")
-        
+
         # Filters
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -639,13 +631,13 @@ def show_registrar_dashboard_old():
             else:
                 semester_options = ["All"] + (list(semesters_df["Semester"].unique()) if not semesters_df.empty else [])
             semester = st.selectbox("Semester", semester_options, key="passfail_semester")
-        
+
         if st.button("Apply Filters", key="passfail_apply"):
             with st.spinner("Loading pass/fail distribution data..."):
                 df = get_pass_fail_distribution(data, {"Semester": semester, "Course": course, "SchoolYear": year})
-                
+
                 if not df.empty:
-                    # Summary statistics
+                    # === Summary statistics ===
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         total_records = len(df)
@@ -659,14 +651,18 @@ def show_registrar_dashboard_old():
                     with col4:
                         pass_rate = (pass_count / total_records * 100) if total_records > 0 else 0
                         st.metric("Pass Rate", f"{pass_rate:.1f}%")
-                    
-                    # Pass/Fail distribution by subject
-                    subject_summary = df.groupby(["Subject", "Status"]).size().unstack(fill_value=0)
-                    
-                    # Bar chart for pass/fail by subject
+
+                    # === Pass/Fail distribution by subject (calculated summary) ===
+                    subject_summary = df.groupby(["Subject", "Status"]).size().unstack(fill_value=0).reset_index()
+                    subject_summary["Total"] = subject_summary["Pass"] + subject_summary["Fail"]
+                    subject_summary["Pass Rate (%)"] = (subject_summary["Pass"] / subject_summary["Total"] * 100).round(2)
+                    subject_summary["Fail Rate (%)"] = (subject_summary["Fail"] / subject_summary["Total"] * 100).round(2)
+                    summary_table = subject_summary[["Subject", "Pass Rate (%)", "Fail Rate (%)"]]
+
+                    # === Bar Chart ===
                     fig_bar = px.bar(
-                        subject_summary.reset_index(), 
-                        x="Subject", 
+                        subject_summary,
+                        x="Subject",
                         y=["Pass", "Fail"],
                         title="Pass/Fail Distribution by Subject",
                         color_discrete_map={"Pass": "#2E8B57", "Fail": "#DC143C"},
@@ -678,23 +674,8 @@ def show_registrar_dashboard_old():
                         xaxis_title="Subject"
                     )
                     st.plotly_chart(fig_bar, use_container_width=True)
-                    
-                    # Stacked bar chart
-                    fig_stacked = px.bar(
-                        subject_summary.reset_index(), 
-                        x="Subject", 
-                        y=["Pass", "Fail"],
-                        title="Pass/Fail Distribution by Subject (Stacked)",
-                        color_discrete_map={"Pass": "#2E8B57", "Fail": "#DC143C"}
-                    )
-                    fig_stacked.update_layout(
-                        xaxis_tickangle=-45,
-                        yaxis_title="Number of Students",
-                        xaxis_title="Subject"
-                    )
-                    st.plotly_chart(fig_stacked, use_container_width=True)
-                    
-                    # Overall pass/fail pie chart
+
+                    # === Pie Chart ===
                     status_counts = df["Status"].value_counts()
                     fig_pie = px.pie(
                         values=status_counts.values,
@@ -703,15 +684,34 @@ def show_registrar_dashboard_old():
                         color_discrete_map={"Pass": "#2E8B57", "Fail": "#DC143C"}
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
-                    
-                    # Detailed data table
-                    st.subheader("Detailed Pass/Fail Data")
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Summary table
-                    st.subheader("Summary by Subject")
-                    st.dataframe(subject_summary, use_container_width=True)
-                    
+
+                    # === Pass/Fail Rate Table ===
+                    st.subheader("📊 Pass/Fail Rates by Subject")
+                    st.dataframe(summary_table, use_container_width=True)
+
+                    # === PDF Report ===
+                    pdf_buffer = generate_pdf(
+                        title="Pass/Fail Distribution Report",
+                        summary_metrics={
+                            "Total Records": total_records,
+                            "Pass Count": pass_count,
+                            "Fail Count": fail_count,
+                            "Pass Rate": f"{pass_rate:.1f}%"
+                        },
+                        dataframes=[("Pass/Fail Rates by Subject", summary_table)],
+                        charts=[
+                            ("Pass/Fail Distribution by Subject", fig_bar),
+                            ("Overall Pass/Fail Distribution", fig_pie)
+                        ]
+                    )
+
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer,
+                        file_name="pass_fail_distribution_report.pdf",
+                        mime="application/pdf"
+                    )
+
                 else:
                     st.warning("No data available for the selected filters")
         else:
@@ -734,7 +734,7 @@ def show_registrar_dashboard_old():
                 df = get_enrollment_trends(data, {"Course": course})
                 
                 if not df.empty:
-                    # Summary statistics
+                    # === Summary statistics ===
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         total_enrollment = df["Count"].sum()
@@ -749,7 +749,8 @@ def show_registrar_dashboard_old():
                         unique_semesters = len(df["Semester"].unique())
                         st.metric("Semesters Tracked", unique_semesters)
                     
-                    # Line chart for enrollment trends
+                    # === Charts and Tables ===
+                    charts = []
                     if yoy:
                         # Year-over-year analysis
                         fig_line = px.line(
@@ -760,16 +761,13 @@ def show_registrar_dashboard_old():
                             title="Enrollment Trends by School Year",
                             markers=True
                         )
-                        fig_line.update_layout(
-                            xaxis_tickangle=-45,
-                            yaxis_title="Number of Students",
-                            xaxis_title="Semester"
-                        )
+                        fig_line.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig_line, use_container_width=True)
-                        
-                        # Year-over-year data table
+                        charts.append(("Enrollment Trends by School Year", fig_line))
+
                         st.subheader("Year-over-Year Enrollment Data")
                         st.dataframe(df, use_container_width=True)
+                        table_data = df
                     else:
                         # Overall enrollment trend
                         overall_enrollment = df.groupby("Semester")["Count"].sum().reset_index()
@@ -782,12 +780,9 @@ def show_registrar_dashboard_old():
                             title="Overall Enrollment Trends",
                             markers=True
                         )
-                        fig_line.update_layout(
-                            xaxis_tickangle=-45,
-                            yaxis_title="Number of Students",
-                            xaxis_title="Semester"
-                        )
+                        fig_line.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig_line, use_container_width=True)
+                        charts.append(("Overall Enrollment Trends", fig_line))
                         
                         # Area chart for cumulative enrollment
                         overall_enrollment["Cumulative"] = overall_enrollment["Count"].cumsum()
@@ -797,12 +792,8 @@ def show_registrar_dashboard_old():
                             y="Cumulative",
                             title="Cumulative Enrollment Over Time"
                         )
-                        fig_area.update_layout(
-                            xaxis_tickangle=-45,
-                            yaxis_title="Cumulative Students",
-                            xaxis_title="Semester"
-                        )
                         st.plotly_chart(fig_area, use_container_width=True)
+                        charts.append(("Cumulative Enrollment Over Time", fig_area))
                         
                         # Bar chart for semester comparison
                         fig_bar = px.bar(
@@ -813,21 +804,18 @@ def show_registrar_dashboard_old():
                             color="Count",
                             color_continuous_scale="Blues"
                         )
-                        fig_bar.update_layout(
-                            xaxis_tickangle=-45,
-                            yaxis_title="Number of Students",
-                            xaxis_title="Semester"
-                        )
+                        fig_bar.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig_bar, use_container_width=True)
+                        charts.append(("Enrollment by Semester", fig_bar))
                         
                         # Data table
                         st.subheader("Enrollment Data by Semester")
                         st.dataframe(overall_enrollment, use_container_width=True)
+                        table_data = overall_enrollment
                     
-                    # Course breakdown if not filtered
+                    # Course breakdown
                     if course == "All":
                         course_breakdown = df.groupby("Course")["Count"].sum().reset_index().sort_values("Count", ascending=False)
-                        
                         fig_pie = px.pie(
                             course_breakdown, 
                             values="Count", 
@@ -835,10 +823,31 @@ def show_registrar_dashboard_old():
                             title="Enrollment Distribution by Course"
                         )
                         st.plotly_chart(fig_pie, use_container_width=True)
+                        charts.append(("Enrollment Distribution by Course", fig_pie))
                         
                         st.subheader("Enrollment by Course")
                         st.dataframe(course_breakdown, use_container_width=True)
-                    
+
+                    # === PDF Export Button ===
+                    pdf_buffer = generate_pdf(
+                        title="Enrollment Trends Report",
+                        summary_metrics={
+                            "Total Enrollment": total_enrollment,
+                            "Average per Semester": f"{avg_per_semester:.0f}",
+                            "Peak Enrollment": max_enrollment,
+                            "Semesters Tracked": unique_semesters
+                        },
+                        dataframes=[("Enrollment Data", table_data)],
+                        charts=charts
+                    )
+
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer,
+                        file_name="enrollment_trends_report.pdf",
+                        mime="application/pdf"
+                    )
+
                 else:
                     st.warning("No enrollment data available")
         else:
@@ -945,6 +954,8 @@ def show_registrar_dashboard_old():
                 summary, year_level_summary = get_retention_dropout(data, {"Course": course})
                 
                 if not summary.empty:
+                    charts = []  # Collect charts for PDF
+                    
                     # Calculate retention rate
                     total_students = summary["Count"].sum()
                     retained_count = summary[summary["Status"] == "Retained"]["Count"].iloc[0] if "Retained" in summary["Status"].values else 0
@@ -970,13 +981,13 @@ def show_registrar_dashboard_old():
                         color_discrete_map={"Retained": "#2E8B57", "Dropped": "#DC143C"}
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
+                    charts.append(("Overall Retention vs Dropout", fig_pie))
                     
                     # Year level analysis
                     if not year_level_summary.empty:
-                        # Pivot for better visualization
                         year_level_pivot = year_level_summary.pivot(index="YearLevel", columns="Status", values="Count").fillna(0)
                         
-                        # Stacked bar chart by year level
+                        # Stacked bar chart
                         fig_bar = px.bar(
                             year_level_pivot.reset_index(),
                             x="YearLevel",
@@ -990,12 +1001,12 @@ def show_registrar_dashboard_old():
                             yaxis_title="Number of Students"
                         )
                         st.plotly_chart(fig_bar, use_container_width=True)
+                        charts.append(("Retention by Year Level", fig_bar))
                         
-                        # Calculate retention rate by year level
+                        # Retention rate by year level
                         year_level_pivot["Total"] = year_level_pivot["Retained"] + year_level_pivot["Dropped"]
                         year_level_pivot["Retention_Rate"] = (year_level_pivot["Retained"] / year_level_pivot["Total"] * 100).round(1)
                         
-                        # Retention rate by year level
                         fig_line = px.line(
                             year_level_pivot.reset_index(),
                             x="YearLevel",
@@ -1009,6 +1020,7 @@ def show_registrar_dashboard_old():
                             yaxis=dict(range=[0, 100])
                         )
                         st.plotly_chart(fig_line, use_container_width=True)
+                        charts.append(("Retention Rate by Year Level", fig_line))
                         
                         # Year level data table
                         st.subheader("Retention Analysis by Year Level")
@@ -1023,6 +1035,29 @@ def show_registrar_dashboard_old():
                     summary_display.columns = ["Status", "Count", "Percentage (%)"]
                     st.dataframe(summary_display, use_container_width=True)
                     
+                    # === PDF Download Button ===
+                    pdf_buffer = generate_pdf(
+                        title="Retention and Dropout Report",
+                        summary_metrics={
+                            "Total Students": total_students,
+                            "Retained": retained_count,
+                            "Dropped": dropped_count,
+                            "Retention Rate": f"{retention_rate:.1f}%"
+                        },
+                        dataframes=[
+                            ("Overall Retention Summary", summary_display),
+                            ("Retention Analysis by Year Level", display_df if not year_level_summary.empty else None)
+                        ],
+                        charts=charts
+                    )
+                    
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer,
+                        file_name="retention_dropout_report.pdf",
+                        mime="application/pdf"
+                    )
+                    
                 else:
                     st.warning("No retention data available")
         else:
@@ -1034,14 +1069,14 @@ def show_registrar_dashboard_old():
         
         # Filters
         semester_options = ["All"] + list(semesters_df["Semester"].unique()) if not semesters_df.empty else ["All"]
-        top_semester = st.selectbox("Semester (optional)", semester_options, key="top_semester")
+        top_semester = st.selectbox("Semester (optional)", semester_options, key="top_semester_tab6")
         
-        if st.button("Load Top Performers", key="top_apply"):
+        if st.button("Load Top Performers", key="top_apply_tab6"):
             with st.spinner("Loading top performers data..."):
                 df = get_top_performers(data, {"Semester": top_semester})
                 
                 if not df.empty:
-                    # Summary statistics
+                    # === Summary statistics ===
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         total_performers = len(df)
@@ -1056,25 +1091,20 @@ def show_registrar_dashboard_old():
                         unique_courses = df["Course"].nunique()
                         st.metric("Programs Represented", unique_courses)
                     
-                    # Top performers leaderboard
+                    # === Leaderboard ===
                     st.subheader("🏅 Top Performers Leaderboard")
-                    
-                    # Add ranking
                     df_ranked = df.copy()
                     df_ranked["Rank"] = df_ranked.groupby("Course")["GPA"].rank(method="dense", ascending=False).astype(int)
                     df_ranked = df_ranked.sort_values(["Course", "Rank"])
                     
-                    # Display top 10 per program
                     for course in df_ranked["Course"].unique():
                         course_data = df_ranked[df_ranked["Course"] == course].head(10)
                         st.subheader(f"📚 {course}")
-                        
-                        # Create a styled table
                         display_data = course_data[["Rank", "Name", "YearLevel", "GPA"]].copy()
                         display_data.columns = ["Rank", "Student Name", "Year Level", "GPA"]
                         st.dataframe(display_data, use_container_width=True, hide_index=True)
                     
-                    # GPA distribution by program
+                    # === Charts ===
                     fig_box = px.box(
                         df, 
                         x="Course", 
@@ -1089,7 +1119,6 @@ def show_registrar_dashboard_old():
                     )
                     st.plotly_chart(fig_box, use_container_width=True)
                     
-                    # Top performers scatter plot
                     fig_scatter = px.scatter(
                         df, 
                         x="YearLevel", 
@@ -1105,7 +1134,7 @@ def show_registrar_dashboard_old():
                     )
                     st.plotly_chart(fig_scatter, use_container_width=True)
                     
-                    # Program comparison
+                    # === Program comparison ===
                     program_stats = df.groupby("Course").agg({
                         "GPA": ["mean", "max", "count"]
                     }).round(2)
@@ -1115,14 +1144,29 @@ def show_registrar_dashboard_old():
                     st.subheader("Program Performance Comparison")
                     st.dataframe(program_stats, use_container_width=True)
                     
-                    # Export options
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("Export to Excel", key="export_top_performers_excel"):
-                            filename = f"top_performers_{top_semester}.xlsx"
-                            export_to_excel(df_ranked, filename)
-                            st.success(f"Exported to {filename}")
+                    # === PDF Export Button ===
+                    pdf_buffer = generate_pdf(
+                        title="Top Performers Report",
+                        summary_metrics={
+                            "Total Top Performers": total_performers,
+                            "Average GPA": f"{avg_gpa:.2f}",
+                            "Highest GPA": f"{max_gpa:.2f}",
+                            "Programs Represented": unique_courses
+                        },
+                        dataframes=[("Program Performance Comparison", program_stats.reset_index())],
+                        charts=[
+                            ("GPA Distribution by Program", fig_box),
+                            ("Top Performers by Year Level and GPA", fig_scatter)
+                        ]
+                    )
                     
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer,
+                        file_name=f"top_performers_{top_semester}.pdf",
+                        mime="application/pdf"
+                    )
+                
                 else:
                     st.warning("No top performers data available")
         else:
@@ -1548,12 +1592,12 @@ def show_registrar_dashboard_new():
                     st.subheader("📝 2nd Year & Future Subjects - Prerequisite Check")
                     st.markdown("For 1st year students: Check if prerequisites are met for 2nd year and future subjects.")
                 else:
-                    st.subheader("📝 Current & Future Subjects - Enrollment Evaluation")
-                    st.markdown("Evaluate enrollment eligibility for current and future subjects based on prerequisites and academic progress.")
-                
+                    st.subheader("📝 Future Subjects - Enrollment Evaluation")
+                    st.markdown("Evaluate enrollment eligibility for future subjects based on prerequisites and academic progress.")
+
                 # Get curriculum data for future subjects evaluation
                 curr_df = load_curriculums_df()
-                
+
                 if not curr_df.empty:
                     # Filter curriculum by student's course
                     student_course = student_info.get("Course", "")
@@ -1568,6 +1612,7 @@ def show_registrar_dashboard_new():
                         filtered_curr = curr_df
                     
                     # Process each matching curriculum for future subjects
+                    all_future_display_data = []  # for download
                     for _, crow in filtered_curr.iterrows():
                         st.markdown(f"### {crow.get('courseCode', '')} - {crow.get('courseName', '')} ({crow.get('curriculumYear', '')})")
                         subjects = crow.get("subjects", []) or []
@@ -1577,26 +1622,16 @@ def show_registrar_dashboard_new():
                             continue
                         
                         subj_df = pd.DataFrame(subjects)
-                        # Ensure columns
                         for c in ["subjectCode", "subjectName", "yearLevel", "semester", "units", "lec", "lab", "prerequisite"]:
                             if c not in subj_df.columns:
                                 subj_df[c] = None
                         
-                        # Filter to current and future subjects based on student's year level
+                        # Filter to only future subjects (year_level > student's current year)
                         subj_df["_yl_num"] = pd.to_numeric(subj_df["yearLevel"], errors="coerce")
-                        
-                        if student_year == 1:
-                            # For 1st year students: show 2nd year and future subjects (year_level > 1)
-                            future_subj_df = subj_df[subj_df["_yl_num"] > 1].copy()
-                            if future_subj_df.empty:
-                                st.info("No 2nd year or future subjects found in this curriculum.")
-                                continue
-                        else:
-                            # For other years: show current and future subjects (year_level >= student's current year)
-                            future_subj_df = subj_df[subj_df["_yl_num"] >= student_year].copy()
-                            if future_subj_df.empty:
-                                st.info("No current or future subjects found in this curriculum.")
-                                continue
+                        future_subj_df = subj_df[subj_df["_yl_num"] > student_year].copy()
+                        if future_subj_df.empty:
+                            st.info("No future subjects found in this curriculum.")
+                            continue
                         
                         # Group by year level and semester
                         group_cols = ["yearLevel", "semester"] if "semester" in future_subj_df.columns else ["yearLevel"]
@@ -1617,20 +1652,9 @@ def show_registrar_dashboard_new():
                                 title = f"Year {grp_key}"
                                 year_level = grp_key
                             
-                            # Add visual indicator for current vs future year
-                            if student_year == 1:
-                                # For 1st year students: all future subjects are "Future Year"
-                                year_indicator = "📘 Future Year"
-                            else:
-                                # For other years: distinguish current vs future
-                                if year_level == student_year:
-                                    year_indicator = "📖 Current Year"
-                                else:
-                                    year_indicator = "📘 Future Year"
-                            
+                            year_indicator = "📘 Future Year"
                             st.subheader(f"{year_indicator} - {title}")
                             
-                            # Evaluate each subject in this group
                             display_data = []
                             completed_codes = {subj["subject_code"] for subj in completed_subjects}
                             
@@ -1642,50 +1666,34 @@ def show_registrar_dashboard_new():
                                 return [str(prereq).strip()]
                             
                             def normalize_subject_code(code):
-                                """Normalize subject code by removing spaces and converting to uppercase"""
                                 if not code:
                                     return ""
                                 return str(code).replace(" ", "").upper()
                             
-                            # Get all completed subjects (with passing grades) for prerequisite checking
-                            completed_codes_with_grades = {}
-                            for comp_subj in completed_subjects:
-                                # Normalize the subject code for matching
-                                normalized_code = normalize_subject_code(comp_subj["subject_code"])
-                                completed_codes_with_grades[normalized_code] = comp_subj["grade"]
-                            
-                            # Create set of prerequisite-eligible subject codes (all completed subjects)
+                            completed_codes_with_grades = {normalize_subject_code(subj["subject_code"]): subj["grade"] for subj in completed_subjects}
                             prereq_eligible_codes = set(completed_codes_with_grades.keys())
                             
                             for _, subject in grp.iterrows():
                                 subj_code = str(subject["subjectCode"])
-                                
-                                # Check if already taken
                                 if subj_code in completed_codes:
                                     status = "✅ Already Passed"
                                     grade_display = ""
                                     enroll = "No - Already Passed"
-                                    # Find the grade
                                     for comp_subj in completed_subjects:
                                         if comp_subj["subject_code"] == subj_code:
                                             grade_display = f"({comp_subj['grade']})"
                                             break
                                 else:
-                                    # Check prerequisites against all completed subjects
                                     prerequisites = parse_prereq(subject.get("prerequisite", []))
                                     missing_prereqs = []
                                     met_prereqs = []
-                                    
                                     for prereq in prerequisites:
-                                        # Normalize prerequisite code for matching
                                         normalized_prereq = normalize_subject_code(prereq)
                                         if normalized_prereq in prereq_eligible_codes:
-                                            # Prerequisite is completed, show the grade
                                             prereq_grade = completed_codes_with_grades.get(normalized_prereq, "N/A")
                                             met_prereqs.append(f"{prereq}({prereq_grade})")
                                         else:
                                             missing_prereqs.append(prereq)
-                                    
                                     if not missing_prereqs:
                                         status = "📝 Ready to Enroll"
                                         grade_display = f"Prereqs: {', '.join(met_prereqs)}"
@@ -1707,15 +1715,14 @@ def show_registrar_dashboard_new():
                                     "Prerequisite": subject["prerequisite"]
                                 })
                             
+                            all_future_display_data.extend(display_data)
+                            
                             display_df = pd.DataFrame(display_data)
                             st.dataframe(display_df, use_container_width=True, hide_index=True)
                             
-                            # Calculate totals for this semester
                             total_units = pd.to_numeric(grp["units"], errors="coerce").fillna(0).sum()
                             total_lec = pd.to_numeric(grp["lec"], errors="coerce").fillna(0).sum()
                             total_lab = pd.to_numeric(grp["lab"], errors="coerce").fillna(0).sum()
-                            
-                            # Count enrollment recommendations
                             ready_to_enroll = len([d for d in display_data if d["Enroll?"].startswith("Yes")])
                             already_passed = len([d for d in display_data if "Already Passed" in d["Status"]])
                             missing_prereqs = len([d for d in display_data if "Prerequisites Not Met" in d["Status"]])
@@ -1731,36 +1738,82 @@ def show_registrar_dashboard_new():
                                 st.metric("Missing Prereqs", missing_prereqs)
                             
                             st.markdown("---")
-                        
-                        # Overall summary for this curriculum
-                        if student_year == 1:
-                            st.subheader("📊 2nd Year & Future Subjects Prerequisite Summary")
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("1st Year Completed", len(completed_subjects))
-                            with col2:
-                                st.metric("2nd Year & Future Subjects", len(future_subj_df))
-                            with col3:
-                                total_ready = len([d for d in display_data if d["Enroll?"].startswith("Yes")])
-                                st.metric("Ready to Enroll", total_ready)
-                            with col4:
-                                total_missing = len([d for d in display_data if "Prerequisites Not Met" in d["Status"]])
-                                st.metric("Missing Prereqs", total_missing)
-                        else:
-                            st.subheader("📊 Current & Future Subjects Enrollment Summary")
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("Completed Subjects", len(completed_subjects))
-                            with col2:
-                                st.metric("Current & Future Subjects", len(future_subj_df))
-                            with col3:
-                                total_ready = len([d for d in display_data if d["Enroll?"].startswith("Yes")])
-                                st.metric("Ready to Enroll", total_ready)
-                            with col4:
-                                total_missing = len([d for d in display_data if "Prerequisites Not Met" in d["Status"]])
-                                st.metric("Missing Prereqs", total_missing)
-                        
-                        st.markdown("---")
+                    
+                    # Download button for all displayed subjects (past, current, future)
+                    all_display_data = []
+
+                    # Collect past/current subjects
+                    past_current_data = []
+                    if not filtered_curr.empty:
+                        for _, crow in filtered_curr.iterrows():
+                            subjects = crow.get("subjects", []) or []
+                            subj_df = pd.DataFrame(subjects)
+                            for c in ["subjectCode", "subjectName", "yearLevel", "semester", "units", "lec", "lab", "prerequisite"]:
+                                if c not in subj_df.columns:
+                                    subj_df[c] = None
+                            subj_df["_yl_num"] = pd.to_numeric(subj_df["yearLevel"], errors="coerce")
+                            if student_year == 1:
+                                relevant_subj_df = subj_df[subj_df["_yl_num"] == 1].copy()
+                            else:
+                                relevant_subj_df = subj_df[subj_df["_yl_num"] <= student_year].copy()
+                            if relevant_subj_df.empty:
+                                continue
+                            
+                            for _, subject in relevant_subj_df.iterrows():
+                                subj_code = str(subject["subjectCode"])
+                                grade_display = ""
+                                status = "❌ Not Completed"
+                                for comp_subj in completed_subjects:
+                                    if comp_subj["subject_code"] == subj_code:
+                                        grade_display = f"{comp_subj['grade']}"
+                                        status = "✅ Passed" if float(comp_subj['grade']) >= 75 else "❌ Failed"
+                                        break
+                                past_current_data.append({
+                                    "Subject Code": subject["subjectCode"],
+                                    "Subject Name": subject["subjectName"],
+                                    "Units": subject["units"],
+                                    "Lec": subject["lec"],
+                                    "Lab": subject["lab"],
+                                    "Status": status,
+                                    "Grade": grade_display,
+                                    "Prerequisite": subject["prerequisite"]
+                                })
+
+                    # Future subjects
+                    future_data = all_future_display_data if all_future_display_data else []
+
+                    # Combine all
+                    all_display_data = past_current_data + future_data
+
+                    # Prepare summary metrics
+                    summary_metrics = {
+                        "Student Name": student_info.get("Name", "Unknown"),
+                        "Student ID": student_info.get("_id", ""),
+                        "Year Level": student_year
+                    }
+
+                    # Prepare tables
+                    tables = []
+                    if past_current_data:
+                        tables.append(("Past & Current Subjects", pd.DataFrame(past_current_data)))
+                    if future_data:
+                        tables.append(("Future Subjects Evaluation", pd.DataFrame(future_data)))
+
+                    # Generate PDF
+                    pdf_buffer = generate_pdf(
+                        title=f"{student_info.get('Name','Student')}'s Subjects Evaluation",
+                        summary_metrics=summary_metrics,
+                        dataframes=tables
+                    )
+
+                    # Streamlit download button
+                    st.download_button(
+                        label="📥 Download All Subjects Evaluation (PDF)",
+                        data=pdf_buffer,
+                        file_name=f"{student_info.get('Name','student')}_subjects_evaluation.pdf",
+                        mime="application/pdf"
+                    )
+
                 else:
                     st.warning("No curriculum data available.")
         else:
