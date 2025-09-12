@@ -241,6 +241,48 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
         
         # Add grade distribution summary
         if not valid_grades.empty:
+            
+            grade_brackets = {
+                "95-100": (95, 100),
+                "90-94": (90, 94),
+                "85-89": (85, 89),
+                "80-84": (80, 84),
+                "75-79": (75, 79),
+                "Below 75": (0, 74)
+            }
+            
+            total_valid = len(valid_grades)
+            bracket_stats = []
+            for bracket, (min_g, max_g) in grade_brackets.items():
+                if bracket == "Below 75":
+                    count = len(valid_grades[valid_grades < 75])
+                else:
+                    count = len(valid_grades[(valid_grades >= min_g) & (valid_grades <= max_g)])
+                percentage = (count / total_valid * 100) if total_valid > 0 else 0
+                bracket_stats.append([bracket, str(count), f"{percentage:.1f}%"])
+            
+            dist_table = Table(
+                [["Grade Bracket", "No. of Students", "Percentage"]] + bracket_stats,
+                colWidths=[1.5*inch, 1.5*inch, 1.5*inch]
+            )
+            dist_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,0), 10),
+                ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+                ('FONTSIZE', (0,1), (-1,-1), 9),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+            ]))
+            
+            elements.append(Paragraph("<b>📊 Grade Distribution by Brackets</b>", info_style))
+            elements.append(Spacer(1, 6))
+            elements.append(dist_table)
+            elements.append(Spacer(1, 20))
+            
+            
             passing_count = len(valid_grades[valid_grades >= 75])
             failing_count = len(valid_grades[valid_grades < 75])
             
@@ -420,20 +462,60 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
 
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             
+            if not valid_grades.empty:
+                st.markdown("**📊 Grade Distribution by Brackets**")
+                
+                # Define grade brackets
+                grade_brackets = {
+                    "95-100 (%)": (95, 100),
+                    "90-94 (%)": (90, 94),
+                    "85-89 (%)": (85, 89),
+                    "80-84 (%)": (80, 84),
+                    "75-79 (%)": (75, 79),
+                    "Below 75 (%)": (0, 74)
+                }
+                
+                # Calculate counts and percentages for each bracket
+                total_valid = len(valid_grades)
+                bracket_stats = {}
+                
+                for bracket_name, (min_grade, max_grade) in grade_brackets.items():
+                    if bracket_name == "Below 75 (%)":
+                        count = len(valid_grades[valid_grades < 75])
+                    else:
+                        count = len(valid_grades[(valid_grades >= min_grade) & (valid_grades <= max_grade)])
+                    
+                    percentage = (count / total_valid * 100) if total_valid > 0 else 0
+                    bracket_stats[bracket_name] = f"{percentage:.1f}%"
+                
+                # Create a single row table for the brackets
+                percentage_df = pd.DataFrame([{
+                    "Subject Code": subject_code,
+                    "Subject Name": subject_desc,
+                    **bracket_stats,
+                    "Total Students": len(table_data)
+                }])
+                
+                st.dataframe(percentage_df, use_container_width=True, hide_index=True)
+            
             st.markdown("**📈 Class Grade Distribution Histogram**")
 
-            # Define grade ranges
+            # Keep your grade_category function exactly as is
             def grade_category(g):
                 if pd.isna(g) or g == 0:
                     return "Not Set"
-                elif g < 75:
-                    return "Needs Improvement (<75)"
-                elif 75 <= g <= 84:
-                    return "Good (75-84)"
-                elif 85 <= g <= 94:
-                    return "Very Good (85-94)"
+                elif g >= 95:
+                    return "95-100"
+                elif g >= 90:
+                    return "90-94"
+                elif g >= 85:
+                    return "85-89"
+                elif g >= 80:
+                    return "80-84"
+                elif g >= 75:
+                    return "75-79"
                 else:
-                    return "Excellent (95-100)"
+                    return "Below 75"
 
             table_data["Grade_Range"] = table_data["Grade_num"].apply(grade_category)
 
@@ -442,24 +524,35 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
                 alt.Chart(table_data[table_data["Grade_Range"] != "Not Set"])
                 .mark_bar(opacity=0.8)
                 .encode(
-                    x=alt.X('Grade_num:Q',
-                            bin=alt.Bin(maxbins=20),
-                            title='Grade Range'),
+                    x=alt.X(
+                        'Grade_num:Q',
+                        bin=alt.Bin(maxbins=20),
+                        title='Grade Range'
+                    ),
                     y=alt.Y('count():Q', title='Number of Students'),
                     color=alt.Color(
                         'Grade_Range:N',
                         title="Grade Category",
                         scale=alt.Scale(
                             domain=[
-                                "Excellent (95-100)",
-                                "Very Good (85-94)",
-                                "Good (75-84)",
-                                "Needs Improvement (<75)"
+                                "95-100",
+                                "90-94",
+                                "85-89",
+                                "80-84",
+                                "75-79",
+                                "Below 75"
                             ],
-                            range=["#28a745", "#17a2b8", "#ffc107", "#dc3545"]
+                            range=[
+                                "#28a745",  # green
+                                "#17a2b8",  # teal
+                                "#007bff",  # blue
+                                "#ffc107",  # yellow
+                                "#fd7e14",  # orange
+                                "#dc3545"   # red
+                            ]
                         )
                     ),
-                    tooltip=['count():Q']
+                    tooltip=['count():Q', 'Grade_Range:N']
                 )
                 .properties(
                     height=300,
