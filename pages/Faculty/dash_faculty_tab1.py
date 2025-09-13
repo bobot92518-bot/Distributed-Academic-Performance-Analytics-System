@@ -10,7 +10,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from io import BytesIO
 from datetime import datetime
 import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics import renderPDF
@@ -407,11 +407,11 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
     }
     
     # Group by semester and subject
-    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel), group in filtered_df.groupby(
-        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel']
+    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel, section), group in filtered_df.groupby(
+        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section']
     ):
         
-        with st.expander(f"{semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_year_map.get(SubjectYearLevel, "")}", expanded=True):
+        with st.expander(f"{semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} {section} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_year_map.get(SubjectYearLevel, "")}", expanded=True):
             
             table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade']].copy()
             table_data.columns = ['Student ID', 'Student Name', 'Course', 'YearLevel', 'Grade']
