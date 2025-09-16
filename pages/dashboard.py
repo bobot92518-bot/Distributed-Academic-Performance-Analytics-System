@@ -136,6 +136,9 @@ def setup_sidebar(role, username, display_name):
             st.session_state['current_page'] = "registrar_main"
             st.session_state['accessed_from_registrar'] = False  # reset
             st.rerun()
+        if st.sidebar.button("🔄 Toggle Dashboard Version", use_container_width=True):
+            st.session_state['use_new_version'] = not st.session_state.get('use_new_version', True)
+            st.rerun()
 
 def sidebar_button(label, page_key):
     if st.sidebar.button(label, key=page_key, use_container_width=True):

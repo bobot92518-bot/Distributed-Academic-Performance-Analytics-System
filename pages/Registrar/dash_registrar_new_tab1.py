@@ -1,11 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 ### Ensure we scroll back to the teacher evaluation section if hash is present
-components.html(
-    '<script>window.addEventListener("load", function(){ if(location.hash=="#teacher-eval-anchor"){ setTimeout(function(){ try{ document.getElementById("teacher-eval-anchor").scrollIntoView({behavior:"instant", block:"start"}); }catch(e){} }, 0); }});</script>',
-    height=0,
-)
-import pandas as pd
+ pandas as pd
 import os
 import plotly.express as px
 import plotly.graph_objects as go
@@ -295,15 +291,15 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
     }
     
     # Group by semester and subject
-    grouped = filtered_df.groupby(['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel'])
-    
-    for i, ((semester, school_year, subject_code, subject_desc, subject_year_level), group) in enumerate(grouped):
-        
+    grouped = filtered_df.groupby(['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section'])
+
+    for i, ((semester, school_year, subject_code, subject_desc, subject_year_level, section), group) in enumerate(grouped):
+
         if i > 0:
             elements.append(PageBreak())
-        
+
         # Subject header
-        subject_header = f"{semester} - {school_year} | {subject_code} - {subject_desc}"
+        subject_header = f"{semester} - {school_year} | {subject_code} {section} - {subject_desc}"
         if subject_year_level and subject_year_level > 0:
             subject_header += f" ({year_map.get(subject_year_level, '')} Subject)"
         

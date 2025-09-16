@@ -212,6 +212,10 @@ def show_registrar_new_tab7_info(data, students_df, semesters_df):
                     subject_summary["Fail Rate (%)"] = (subject_summary["Fail"] / subject_summary["Total"] * 100).round(2)
                     summary_table = subject_summary[["Subject", "Pass Rate (%)", "Fail Rate (%)"]]
 
+                    # === Pass/Fail Rate Table ===
+                    st.subheader("📊 Pass/Fail Rates by Subject")
+                    st.dataframe(summary_table, use_container_width=True)
+
                     # === Bar Chart ===
                     fig_bar = px.bar(
                         subject_summary,
@@ -237,10 +241,6 @@ def show_registrar_new_tab7_info(data, students_df, semesters_df):
                         color_discrete_map={"Pass": "#2E8B57", "Fail": "#DC143C"}
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
-
-                    # === Pass/Fail Rate Table ===
-                    st.subheader("📊 Pass/Fail Rates by Subject")
-                    st.dataframe(summary_table, use_container_width=True)
 
                 else:
                     st.warning("No data available for the selected filters")

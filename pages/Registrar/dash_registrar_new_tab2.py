@@ -16,6 +16,12 @@ from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_c
 from pages.Registrar.pdf_helper import generate_pdf
 import time
 import json
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from io import BytesIO
+from datetime import datetime
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -107,8 +113,13 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
         grades_df = data['grades']
         subjects_df = data['subjects']
 
+        styles = getSampleStyleSheet()
+        additional_elements = []
+
         st.subheader("📋 Evaluation Form")
         st.markdown("Enter a student name to evaluate their enrollment eligibility for future subjects.")
+        additional_elements.append(Paragraph("📋 Evaluation Form", styles["Heading1"]))
+        additional_elements.append(Spacer(1, 10))
         
         # Student dropdown (same as Tab 2)
         student_options = [] if students_df.empty else students_df[["_id", "Name", "Course", "YearLevel"]].copy()
@@ -147,6 +158,12 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                         st.metric("Name", student_info.get('Name', 'N/A'))
                     with col3:
                         st.metric("Year Level", student_info.get('YearLevel', 'N/A'))
+
+                    additional_elements.append(Paragraph("Student Information", styles["Heading2"]))
+                    additional_elements.append(Paragraph(f"Student ID: {student_info.get('_id', 'N/A')}", styles["Normal"]))
+                    additional_elements.append(Paragraph(f"Name: {student_info.get('Name', 'N/A')}", styles["Normal"]))
+                    additional_elements.append(Paragraph(f"Year Level: {student_info.get('YearLevel', 'N/A')}", styles["Normal"]))
+                    additional_elements.append(Spacer(1, 10))
                     
                     student_year = int(str(student_info.get('YearLevel', 1)).strip()) if str(student_info.get('YearLevel', 1)).strip().isdigit() else 1
                 
@@ -185,9 +202,13 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                 if student_year == 1:
                     st.subheader("📚 1st Year Subjects - Pass/Fail Status")
                     st.markdown("For 1st year students: Shows 1st year 1st sem and 1st year 2nd sem subjects with pass/fail status.")
+                    additional_elements.append(Paragraph("📚 1st Year Subjects - Pass/Fail Status", styles["Heading2"]))
+                    additional_elements.append(Spacer(1, 10))
                 else:
                     st.subheader("📚 Past & Current Year Subjects - Completed & Not Completed")
                     st.markdown("Shows subjects from semesters the student has already passed through.")
+                    additional_elements.append(Paragraph("📚 Past & Current Year Subjects - Completed & Not Completed", styles["Heading2"]))
+                    additional_elements.append(Spacer(1, 10))
                 
                 # Get curriculum data to organize subjects from past/current semesters
                 curr_df = load_curriculums_df()
@@ -253,7 +274,9 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                             else:
                                 title = f"Year {grp_key}"
                             st.subheader(f"📘 {title}")
-                            
+                            additional_elements.append(Paragraph(f"📘 {title}", styles["Heading3"]))
+                            additional_elements.append(Spacer(1, 5))
+
                             # Create display data for subjects
                             display_data = []
                             
@@ -356,12 +379,20 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                                 st.metric("Total Lab Hours", f"{int(total_lab)}")
                             with col4:
                                 st.metric("Average Grade", f"{avg_grade:.1f}")
-                            
+
+                            additional_elements.append(Paragraph(f"Total Units: {int(total_units)}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Total Lec Hours: {int(total_lec)}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Total Lab Hours: {int(total_lab)}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Average Grade: {avg_grade:.1f}", styles["Normal"]))
+                            additional_elements.append(Spacer(1, 10))
+
                             st.markdown("---")
                             
                         # Overall summary for subjects
                         if student_year == 1:
                             st.subheader("📊 1st Year Subjects Summary")
+                            additional_elements.append(Paragraph("📊 1st Year Subjects Summary", styles["Heading2"]))
+                            additional_elements.append(Spacer(1, 10))
                             col1, col2, col3, col4 = st.columns(4)
                             with col1:
                                 completed_count = len(completed_subjects)
@@ -377,8 +408,15 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                             with col4:
                                 excellent_count = len([g for g in all_grades if g >= 90])
                                 st.metric("Excellent (≥90)", excellent_count)
+                            additional_elements.append(Paragraph(f"Completed: {completed_count}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Not Yet Taken: {not_taken_count}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Overall Average: {overall_avg:.1f}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Excellent (≥90): {excellent_count}", styles["Normal"]))
+                            additional_elements.append(Spacer(1, 10))
                         else:
                             st.subheader("📊 Past & Current Year Subjects Summary")
+                            additional_elements.append(Paragraph("📊 Past & Current Year Subjects Summary", styles["Heading2"]))
+                            additional_elements.append(Spacer(1, 10))
                             col1, col2, col3, col4 = st.columns(4)
                             with col1:
                                 completed_count = len(completed_subjects)
@@ -394,6 +432,11 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                             with col4:
                                 excellent_count = len([g for g in all_grades if g >= 90])
                                 st.metric("Excellent (≥90)", excellent_count)
+                            additional_elements.append(Paragraph(f"Completed: {completed_count}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Not Completed: {not_completed_count}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Overall Average: {overall_avg:.1f}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Excellent (≥90): {excellent_count}", styles["Normal"]))
+                            additional_elements.append(Spacer(1, 10))
                         
                         st.markdown("---")
                 else:
@@ -410,9 +453,13 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                 if student_year == 1:
                     st.subheader("📝 2nd Year & Future Subjects - Prerequisite Check")
                     st.markdown("For 1st year students: Check if prerequisites are met for 2nd year and future subjects.")
+                    additional_elements.append(Paragraph("📝 2nd Year & Future Subjects - Prerequisite Check", styles["Heading2"]))
+                    additional_elements.append(Spacer(1, 10))
                 else:
                     st.subheader("📝 Future Subjects - Enrollment Evaluation")
                     st.markdown("Evaluate enrollment eligibility for future subjects based on prerequisites and academic progress.")
+                    additional_elements.append(Paragraph("📝 Future Subjects - Enrollment Evaluation", styles["Heading2"]))
+                    additional_elements.append(Spacer(1, 10))
 
                 # Get curriculum data for future subjects evaluation
                 curr_df = load_curriculums_df()
@@ -473,6 +520,8 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                             
                             year_indicator = "📘 Future Year"
                             st.subheader(f"{year_indicator} - {title}")
+                            additional_elements.append(Paragraph(f"{year_indicator} - {title}", styles["Heading3"]))
+                            additional_elements.append(Spacer(1, 5))
                             
                             display_data = []
                             completed_codes = {subj["subject_code"] for subj in completed_subjects}
@@ -555,14 +604,19 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                                 st.metric("Already Passed", already_passed)
                             with col4:
                                 st.metric("Missing Prereqs", missing_prereqs)
-                            
+
+                            additional_elements.append(Paragraph(f"Total Units: {int(total_units)}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Ready to Enroll: {ready_to_enroll}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Already Passed: {already_passed}", styles["Normal"]))
+                            additional_elements.append(Paragraph(f"Missing Prereqs: {missing_prereqs}", styles["Normal"]))
+                            additional_elements.append(Spacer(1, 10))
+
                             st.markdown("---")
                     
                     # Download button for all displayed subjects (past, current, future)
-                    all_display_data = []
 
-                    # Collect past/current subjects
-                    past_current_data = []
+                    # Collect past/current subjects grouped by year/semester
+                    semester_tables = {}
                     if not filtered_curr.empty:
                         for _, crow in filtered_curr.iterrows():
                             subjects = crow.get("subjects", []) or []
@@ -577,32 +631,90 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                                 relevant_subj_df = subj_df[subj_df["_yl_num"] <= student_year].copy()
                             if relevant_subj_df.empty:
                                 continue
-                            
-                            for _, subject in relevant_subj_df.iterrows():
-                                subj_code = str(subject["subjectCode"])
-                                grade_display = ""
-                                status = "❌ Not Completed"
-                                for comp_subj in completed_subjects:
-                                    if comp_subj["subject_code"] == subj_code:
-                                        grade_display = f"{comp_subj['grade']}"
-                                        status = "✅ Passed" if float(comp_subj['grade']) >= 75 else "❌ Failed"
-                                        break
-                                past_current_data.append({
-                                    "Subject Code": subject["subjectCode"],
-                                    "Subject Name": subject["subjectName"],
-                                    "Units": subject["units"],
-                                    "Lec": subject["lec"],
-                                    "Lab": subject["lab"],
-                                    "Status": status,
-                                    "Grade": grade_display,
-                                    "Prerequisite": subject["prerequisite"]
-                                })
 
-                    # Future subjects
-                    future_data = all_future_display_data if all_future_display_data else []
+                            # Group by year level and semester
+                            group_cols = ["yearLevel", "semester"] if "semester" in relevant_subj_df.columns else ["yearLevel"]
+                            try:
+                                grouped = relevant_subj_df.groupby(group_cols)
+                            except Exception:
+                                relevant_subj_df["yearLevel"] = relevant_subj_df["yearLevel"].astype(str)
+                                if "semester" in relevant_subj_df.columns:
+                                    relevant_subj_df["semester"] = relevant_subj_df["semester"].astype(str)
+                                grouped = relevant_subj_df.groupby(group_cols)
 
-                    # Combine all
-                    all_display_data = past_current_data + future_data
+                            # Process each year/semester group
+                            for grp_key, grp in grouped:
+                                if isinstance(grp_key, tuple):
+                                    table_key = f"Year {grp_key[0]} - Sem {grp_key[1]}" if len(grp_key) > 1 else f"Year {grp_key[0]}"
+                                else:
+                                    table_key = f"Year {grp_key}"
+
+                                if table_key not in semester_tables:
+                                    semester_tables[table_key] = []
+
+                                for _, subject in grp.iterrows():
+                                    subj_code = str(subject["subjectCode"])
+                                    grade_display = ""
+                                    status = "❌ Not Completed"
+                                    for comp_subj in completed_subjects:
+                                        if comp_subj["subject_code"] == subj_code:
+                                            grade_display = f"{comp_subj['grade']}"
+                                            status = "✅ Passed" if float(comp_subj['grade']) >= 75 else "❌ Failed"
+                                            break
+                                    semester_tables[table_key].append({
+                                        "Subject Code": subject["subjectCode"],
+                                        "Subject Name": subject["subjectName"],
+                                        "Units": subject["units"],
+                                        "Lec": subject["lec"],
+                                        "Lab": subject["lab"],
+                                        "Status": status,
+                                        "Grade": grade_display,
+                                        "Prerequisite": subject["prerequisite"]
+                                    })
+
+                    # Future subjects grouped by year/semester
+                    future_semester_tables = {}
+                    if all_future_display_data:
+                        # Group future subjects by year/semester based on curriculum data
+                        if not filtered_curr.empty:
+                            for _, crow in filtered_curr.iterrows():
+                                subjects = crow.get("subjects", []) or []
+                                subj_df = pd.DataFrame(subjects)
+                                for c in ["subjectCode", "subjectName", "yearLevel", "semester", "units", "lec", "lab", "prerequisite"]:
+                                    if c not in subj_df.columns:
+                                        subj_df[c] = None
+                                subj_df["_yl_num"] = pd.to_numeric(subj_df["yearLevel"], errors="coerce")
+                                future_subj_df = subj_df[subj_df["_yl_num"] > student_year].copy()
+                                if future_subj_df.empty:
+                                    continue
+
+                                # Group by year level and semester
+                                group_cols = ["yearLevel", "semester"] if "semester" in future_subj_df.columns else ["yearLevel"]
+                                try:
+                                    grouped = future_subj_df.groupby(group_cols)
+                                except Exception:
+                                    future_subj_df["yearLevel"] = future_subj_df["yearLevel"].astype(str)
+                                    if "semester" in future_subj_df.columns:
+                                        future_subj_df["semester"] = future_subj_df["semester"].astype(str)
+                                    grouped = future_subj_df.groupby(group_cols)
+
+                                # Process each year/semester group for future subjects
+                                for grp_key, grp in grouped:
+                                    if isinstance(grp_key, tuple):
+                                        table_key = f"Future Year {grp_key[0]} - Sem {grp_key[1]}" if len(grp_key) > 1 else f"Future Year {grp_key[0]}"
+                                    else:
+                                        table_key = f"Future Year {grp_key}"
+
+                                    if table_key not in future_semester_tables:
+                                        future_semester_tables[table_key] = []
+
+                                    for _, subject in grp.iterrows():
+                                        subj_code = str(subject["subjectCode"])
+                                        # Find matching data from all_future_display_data
+                                        for future_item in all_future_display_data:
+                                            if future_item["Subject Code"] == subj_code:
+                                                future_semester_tables[table_key].append(future_item)
+                                                break
 
                     # Prepare summary metrics
                     summary_metrics = {
@@ -611,25 +723,45 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                         "Year Level": student_year
                     }
 
-                    # Prepare tables
+                    additional_elements.append(Paragraph("Summary Metrics", styles["Heading2"]))
+                    additional_elements.append(Paragraph(f"Student Name: {student_info.get('Name', 'Unknown')}", styles["Normal"]))
+                    additional_elements.append(Paragraph(f"Student ID: {student_info.get('_id', '')}", styles["Normal"]))
+                    additional_elements.append(Paragraph(f"Year Level: {student_year}", styles["Normal"]))
+                    additional_elements.append(Spacer(1, 10))
+
+                    additional_elements.append(Paragraph("Overall Summary", styles["Heading2"]))
+                    additional_elements.append(Paragraph(f"Total Completed Subjects: {len(completed_subjects)}", styles["Normal"]))
+                    additional_elements.append(Paragraph(f"Overall Average Grade: {sum([float(subj['grade']) for subj in completed_subjects]) / len(completed_subjects) if completed_subjects else 0:.1f}", styles["Normal"]))
+                    additional_elements.append(Paragraph(f"Excellent Grades (≥90): {len([subj for subj in completed_subjects if float(subj['grade']) >= 90])}", styles["Normal"]))
+                    additional_elements.append(Spacer(1, 10))
+
+                    additional_elements.append(Paragraph("Future Year Subjects", styles["Heading2"]))
+                    additional_elements.append(Spacer(1, 10))
+
+                    # Prepare tables - one per semester
                     tables = []
-                    if past_current_data:
-                        tables.append(("Past & Current Subjects", pd.DataFrame(past_current_data)))
-                    if future_data:
-                        tables.append(("Future Subjects Evaluation", pd.DataFrame(future_data)))
+                    # Add past/current semester tables
+                    for table_name, data in semester_tables.items():
+                        if data:
+                            tables.append((table_name, pd.DataFrame(data)))
+                    # Add future semester tables
+                    for table_name, data in future_semester_tables.items():
+                        if data:
+                            tables.append((table_name, pd.DataFrame(data)))
 
                     # Generate PDF
                     pdf_buffer = generate_pdf(
-                        title=f"{student_info.get('Name','Student')}'s Subjects Evaluation",
+                        title=f"{student_info.get('Name','Student')}'s Full Evaluation Report",
                         summary_metrics=summary_metrics,
-                        dataframes=tables
+                        dataframes=tables,
+                        additional_elements=additional_elements
                     )
 
                     # Streamlit download button
                     st.download_button(
-                        label="📥 Download All Subjects Evaluation (PDF)",
+                        label="📥 Download Full Evaluation PDF (All Data and Labels)",
                         data=pdf_buffer,
-                        file_name=f"{student_info.get('Name','student')}_subjects_evaluation.pdf",
+                        file_name=f"{student_info.get('Name','student')}_full_evaluation.pdf",
                         mime="application/pdf"
                     )
 

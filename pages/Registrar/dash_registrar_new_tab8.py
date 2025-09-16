@@ -156,6 +156,9 @@ def show_registrar_new_tab8_info(data, students_df, semesters_df):
                 # === Charts and Tables ===
                 if yoy:
                     # Year-over-year analysis
+                    st.subheader("Year-over-Year Enrollment Data")
+                    st.dataframe(df, use_container_width=True)
+
                     fig_line = px.line(
                         df,
                         x="Semester",
@@ -166,13 +169,14 @@ def show_registrar_new_tab8_info(data, students_df, semesters_df):
                     )
                     fig_line.update_layout(xaxis_tickangle=-45)
                     st.plotly_chart(fig_line, use_container_width=True)
-
-                    st.subheader("Year-over-Year Enrollment Data")
-                    st.dataframe(df, use_container_width=True)
                 else:
                     # Overall enrollment trend
                     overall_enrollment = df.groupby("Semester")["Count"].sum().reset_index()
                     overall_enrollment = overall_enrollment.sort_values("Semester")
+
+                    # Data table
+                    st.subheader("Enrollment Data by Semester")
+                    st.dataframe(overall_enrollment, use_container_width=True)
 
                     fig_line = px.line(
                         overall_enrollment,
@@ -206,13 +210,13 @@ def show_registrar_new_tab8_info(data, students_df, semesters_df):
                     fig_bar.update_layout(xaxis_tickangle=-45)
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                    # Data table
-                    st.subheader("Enrollment Data by Semester")
-                    st.dataframe(overall_enrollment, use_container_width=True)
-
                 # Course breakdown
                 if course == "All":
                     course_breakdown = df.groupby("Course")["Count"].sum().reset_index().sort_values("Count", ascending=False)
+
+                    st.subheader("Enrollment by Course")
+                    st.dataframe(course_breakdown, use_container_width=True)
+
                     fig_pie = px.pie(
                         course_breakdown,
                         values="Count",
@@ -220,9 +224,6 @@ def show_registrar_new_tab8_info(data, students_df, semesters_df):
                         title="Enrollment Distribution by Course"
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
-
-                    st.subheader("Enrollment by Course")
-                    st.dataframe(course_breakdown, use_container_width=True)
 
             else:
                 st.warning("No enrollment data available")

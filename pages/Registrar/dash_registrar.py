@@ -211,24 +211,12 @@ def show_registrar_dashboard_old():
 def show_registrar_dashboard_new():
     """Simplified dashboard implementation with 5 tabs including teacher grade analysis"""
 
-    # Add toggle at the top left
-    if 'use_new_version' not in st.session_state:
-        st.session_state.use_new_version = True
-
-    use_new_version = st.toggle(
-        "🆕 Toggle Dashboard Version",
-        value=st.session_state.use_new_version,
-        help="Toggle between the original dashboard and the enhanced version with improved features"
-    )
-
-    st.session_state.use_new_version = use_new_version
+    # Use session state for version toggle
+    use_new_version = st.session_state.get('use_new_version', True)
 
     if not use_new_version:
         show_registrar_dashboard_old()
         st.stop()
-
-    # Add version indicator
-    st.markdown("🆕New Version")
 
     # ✅ Inject CSS to make tabs horizontally scrollable and fit screen
     st.markdown(
@@ -267,8 +255,6 @@ def show_registrar_dashboard_new():
         /* Ensure Streamlit main container doesn't overflow horizontally */
         .block-container, .main {
             max-width: 100% !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
         }
 
         /* Small-screen adjustments */

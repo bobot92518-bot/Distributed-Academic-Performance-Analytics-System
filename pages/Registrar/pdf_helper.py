@@ -7,28 +7,29 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
-def generate_pdf(title, summary_metrics=None, dataframes=None, charts=None):
+def generate_pdf(title, summary_metrics=None, dataframes=None, charts=None, additional_elements=None):
     """
     Generate a PDF report with title, summary metrics, tables, and optional charts.
-    Formatted for Letter landscape with wrapped text for wide tables.
+    Formatted for Letter portrait with multiple tables per page.
 
     Args:
         title (str): Title of the report
         summary_metrics (dict): Summary data to display as key-value
         dataframes (list): List of tuples (table_title, dataframe)
         charts (list): List of tuples (chart_title, fig) where fig is a Plotly figure
+        additional_elements (list): List of additional reportlab elements to include
 
     Returns:
         BytesIO buffer containing the generated PDF.
     """
     buffer = io.BytesIO()
 
-    # Letter landscape page
-    page_width, page_height = landscape(letter)
+    # Letter portrait page
+    page_width, page_height = letter
 
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=landscape(letter),
+        pagesize=letter,
         leftMargin=30,
         rightMargin=30,
         topMargin=30,
@@ -41,13 +42,18 @@ def generate_pdf(title, summary_metrics=None, dataframes=None, charts=None):
 
     # Title
     elements.append(Paragraph(f"<b>{title}</b>", styles["Title"]))
-    elements.append(Spacer(1, 20))
+    elements.append(Spacer(1, 10))  # Reduced spacing
 
     # Summary metrics
     if summary_metrics:
         for key, value in summary_metrics.items():
             elements.append(Paragraph(f"<b>{key}:</b> {value}", normal_style))
-        elements.append(Spacer(1, 15))
+        elements.append(Spacer(1, 8))  # Reduced spacing
+
+    # Additional elements
+    if additional_elements:
+        elements.extend(additional_elements)
+        elements.append(Spacer(1, 8))  # Reduced spacing
 
     # Charts (optional)
     if charts:
@@ -76,24 +82,26 @@ def generate_pdf(title, summary_metrics=None, dataframes=None, charts=None):
                 for row in df.values.tolist():
                     table_data.append([Paragraph(str(cell), normal_style) for cell in row])
 
-                # Auto-scale columns to fit page width
+                # Auto-scale columns to fit page width - make smaller for multiple tables per page
                 col_count = len(df.columns)
                 col_width = (page_width - 60) / col_count  # 30 margin each side
+                # Reduce column width to make tables smaller
+                col_width = min(col_width, 60)  # Cap at 60 points for better fit
                 table = Table(table_data, colWidths=[col_width] * col_count, repeatRows=1)
                 table.hAlign = "CENTER"
 
-                # Style
+                # Style - smaller font and reduced spacing
                 table.setStyle(TableStyle([
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),  # smaller font for wide tables
+                    ("FONTSIZE", (0, 0), (-1, -1), 2),  # extremely small font for compact layout
                     ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
                 ]))
                 elements.append(table)
-                elements.append(Spacer(1, 20))
+                elements.append(Spacer(1, 10))  # Reduced spacing between tables
             else:
                 elements.append(Paragraph("No data available.", normal_style))
                 elements.append(Spacer(1, 20))

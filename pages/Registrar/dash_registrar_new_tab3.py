@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
 import time
 import json
+from datetime import datetime
+from pages.Registrar.dash_registrar_new_tab3_pdf import create_curriculum_pdf
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -196,3 +198,15 @@ def show_registrar_new_tab3_info(data, students_df, semesters_df, grades_df):
 
                     st.success(f"Overall Units in Curriculum: {int(total_units_overall)}")
                     st.markdown("---")
+
+                # PDF Download Button
+                if st.button("📥 Generate Curriculum PDF", key="curriculum_pdf"):
+                    with st.spinner("Generating PDF..."):
+                        pdf_buffer = create_curriculum_pdf(filtered, selected_course, selected_year, group_by_sem)
+                        st.download_button(
+                            label="📥 Download Curriculum PDF",
+                            data=pdf_buffer,
+                            file_name=f"curriculum_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf"
+                        )
+                    st.success("PDF generated successfully!")
