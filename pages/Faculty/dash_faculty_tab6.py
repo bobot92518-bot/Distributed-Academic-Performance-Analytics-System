@@ -12,12 +12,12 @@ from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.textlabels import Label
 from io import BytesIO
 from datetime import datetime
-from global_utils import load_pkl_data, pkl_data_to_df, result_records_to_dataframe
-from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
+from global_utils import result_records_to_dataframe
+from pages.Faculty.faculty_data_helper import get_distinct_section_per_subject, get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
-def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_filter=None, status_filter = None, student_name_filter=None, min_grade=None, max_grade=None):
+def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_filter=None, status_filter = None, student_name_filter=None, selected_section_label=None, min_grade=None, max_grade=None):
     """Display grades in Streamlit format with additional filters"""
     if df.empty:
         st.warning("No grades found for the selected criteria.")
@@ -30,10 +30,10 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
     if subject_filter and subject_filter != " - All Subjects - ":
         filtered_df = filtered_df[filtered_df['subjectCode'] + " - " + filtered_df['subjectDescription'] == subject_filter]
     
-    if student_name_filter:
-        filtered_df = filtered_df[
-            filtered_df['studentName'].str.contains(student_name_filter, case=False, na=False)
-        ]
+    # if student_name_filter:
+    #     filtered_df = filtered_df[
+    #         filtered_df['studentName'].str.contains(student_name_filter, case=False, na=False)
+    #     ]
     
     if filtered_df.empty:
         st.warning("No grades found for the selected filters.")
@@ -55,36 +55,19 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
         4: "| &nbsp; &nbsp; 4th Year Subject",
         5: "| &nbsp; &nbsp; 5th Year Subject",
     }
-    
+    grade_status = f"&nbsp;&nbsp; | &nbsp;&nbsp; {status_filter}" if status_filter is not None and status_filter != " - All - " else ""
+    subject_class = f"| &nbsp;&nbsp; {selected_section_label} &nbsp;&nbsp;" if selected_section_label is not None and selected_section_label != " - All - " else ""
     for (semester, school_year, subject_code, subject_desc, SubjectYearLevel), group in filtered_df.groupby(
         ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel']
     ):
-        st.markdown(f"{semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_year_map.get(SubjectYearLevel, "")}")
+        st.markdown(f"#### 🔍 {semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_class} {subject_year_map.get(SubjectYearLevel, "")} {grade_status}")
             
-        table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade']].copy()
-        table_data.columns = ['Student ID', 'Student Name', 'Course', 'Year Level', 'Grade']
+        table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade','section']].copy()
+        table_data.columns = ['Student ID', 'Student Name', 'Course', 'Year Level', 'Grade','section']
         
         table_data['Grade_num'] = pd.to_numeric(table_data['Grade'], errors='coerce')
         table_data['Student ID'] = table_data['Student ID'].astype(str)
-        
-        
-        if status_filter is not None:
-            if status_filter == "Not Set":
-                valid_grades_by_status = (table_data['Grade_num'].isna()) | (table_data['Grade_num'] == 0)
-                table_data = table_data[valid_grades_by_status]
-
-            elif status_filter == "Failed - Below 75":
-                valid_grades_by_status = (table_data['Grade_num'].notna()) & (table_data['Grade_num'] < 75)
-                table_data = table_data[valid_grades_by_status]
-
-            elif status_filter == "Passed - Above 75":
-                valid_grades_by_status = (table_data['Grade_num'].notna()) & (table_data['Grade_num'] >= 75)
-                table_data = table_data[valid_grades_by_status]
-            
-        if min_grade is not None and max_grade is not None:
-            valid_grades_in_range = (table_data['Grade_num'] >= min_grade) & (table_data['Grade_num'] <= max_grade)
-            no_grades = (table_data['Grade_num'].isna()) | (table_data['Grade_num'] == 0)
-            table_data = table_data[valid_grades_in_range]
+        table_data['Subject Class'] = subject_code + table_data['section']
         
         
         
@@ -121,7 +104,7 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
                     return f"⭐ {grade}"   
 
         table_data['Grade'] = table_data['Grade_num'].apply(grade_with_star)
-        display_df = table_data[['Student ID', 'Student Name', f"{course_column}", f"{year_column}", 'Grade', 'Pass/Fail']]
+        display_df = table_data[['Student ID', 'Student Name', f"{course_column}", f"{year_column}",'Subject Class', 'Grade', 'Pass/Fail']]
         
         def color_status(val):
             if val == 'Passed':
@@ -233,8 +216,8 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
     if not df.empty:
         pdf_bytes = generate_grades_pdf(
             current_faculty, is_new_curriculum, df,
-            semester_filter, subject_filter,status_filter, student_name_filter,
-            min_grade, max_grade
+            semester_filter, status_filter, student_name_filter,selected_section_label,
+            min_grade, max_grade, status_filter
         )
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -274,32 +257,8 @@ def show_faculty_tab6_info(new_curriculum):
             subject_options,
             key="tab6_subject"
         )
-    with col3:
-        subject_options = [" - All - "] + ["Passed - Above 75"] + ["Failed - Below 75"] +["Not Set"]
-        selected_grade_status = st.selectbox(
-            "📚 Student Grade Status", 
-            subject_options,
-            key="tab6_grade_status"
-        )
     
-    # Second row: Student name search and grade range
-    col4, col5, col6 = st.columns([1, 1, 1])
-    with col4:
-        student_name_filter = st.text_input(
-            "🔍 Search Student Name",
-            placeholder="Enter student name to filter...",
-            key="tab6_student_search"
-        )
-    with col5:
-        min_grade = st.number_input("Min grade", value=0.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_min_grade")
-    with col6:
-        max_grade = st.number_input("Max grade", value=100.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_max_grade")
     
-    if max_grade < min_grade:
-        max_grade = min_grade
-    
-    # Load button below all filters
-    load_clicked = st.button("📊 Load Class", type="secondary", key="tab6_load_button")
     
     # Get selected IDs
     selected_semester_id = None
@@ -316,6 +275,63 @@ def show_faculty_tab6_info(new_curriculum):
                 selected_subject_code = subj['_id']
                 break
     
+    
+    sections = []
+    if selected_subject_code:
+        sections = get_distinct_section_per_subject(selected_subject_code, current_faculty)
+    
+    if (new_curriculum):
+        with col3:
+            if sections:
+                # Build section options with value/label mapping
+                section_options = []
+                for row in sections:
+                    subj_code = row["SubjectCodes"]
+                    for sec in row["section"]:
+                        section_options.append({"value": sec, "label": f"{subj_code}{sec}"})
+
+                # Use the labels for the selectbox display
+                selected_section_label = st.selectbox(
+                    "📝 Select Section",
+                    [" - All - "] + [opt["label"] for opt in section_options],
+                    key="tab6_subject_section",
+                    help="Choose a section to track student progress"
+                )
+
+                # Get the actual section value back
+                selected_section_value = next(
+                    (opt["value"] for opt in section_options if opt["label"] == selected_section_label),
+                    None
+                )
+
+            else:
+                selected_section_value = None
+    
+    # Second row: Student name search and grade range
+    col4, col5, col6 = st.columns([1, 1, 1])
+    with col4:
+        subject_options = [" - All - "] + ["Passed - Above 75"] + ["Failed - Below 75"] +["Not Set"]
+        selected_grade_status = st.selectbox(
+            "📚 Student Grade Status", 
+            subject_options,
+            key="tab6_grade_status"
+        )
+    with col5:
+        min_grade = st.number_input("Min grade", value=0.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_min_grade")
+    with col6:
+        max_grade = st.number_input("Max grade", value=100.0, step=1.0, min_value=0.0, max_value=100.0, key="tab6_max_grade")
+    
+    if max_grade < min_grade:
+        max_grade = min_grade
+    
+    student_name_filter = st.text_input(
+            "🔍 Search Student Name",
+            placeholder="Enter student name to filter...",
+            key="tab6_student_search"
+        )
+    # Load button below all filters
+    load_clicked = st.button("📊 Load Class", type="secondary", key="tab6_load_button")
+    
     # Only process data when button is clicked
     if load_clicked:
         with st.spinner("Loading grades data..."):
@@ -326,6 +342,9 @@ def show_faculty_tab6_info(new_curriculum):
                     semester_id=selected_semester_id, 
                     subject_code=selected_subject_code
                 )
+                
+                if selected_section_value is not None and selected_section_value != " - All - ":
+                    results = [res for res in results if res["section"] == selected_section_value]
             else:
                 results = get_student_grades_by_subject_and_semester(
                     current_faculty=current_faculty, 
@@ -336,28 +355,36 @@ def show_faculty_tab6_info(new_curriculum):
             if results:
                 df = result_records_to_dataframe(results)
                 
+                
+                if student_name_filter:
+                    df = df[
+                        df['studentName'].str.contains(student_name_filter, case=False, na=False)
+                    ]
                 # Store in session state for other tabs
                 st.session_state.grades_df = df
                 st.session_state.current_faculty = current_faculty
+                subjectClass = f" - {selected_section_label}" if selected_section_label != " - All - " else ""
                 
-                # Display results with all filters applied
-                # st.success(f"Found {len(results)} grade records for {current_faculty}")
-                print(df.head(1))
                 df['Grade_num'] = pd.to_numeric(df['grade'], errors='coerce')
-                valid_grades = df["Grade_num"][(df["Grade_num"].notna()) & (df["Grade_num"] > 0)]
+                if selected_grade_status is not None and selected_grade_status != " - All - ":
+                    if selected_grade_status == "Not Set":
+                        valid_grades_by_status = (df['Grade_num'].isna()) | (df['Grade_num'] == 0)
+                        df = df[valid_grades_by_status]
 
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1:
-                    st.metric("Total Students", len(df))
-                with col2:
-                    st.metric("Class Average", f"{valid_grades.mean():.1f}" if not valid_grades.empty else "Not Set")
-                with col3:
-                    st.metric("Class Median", f"{valid_grades.median():.1f}" if not valid_grades.empty else "Not Set")
-                with col4:
-                    st.metric("Highest Grade", f"{valid_grades.max()}" if not valid_grades.empty else "Not Set")
-                with col5:
-                    st.metric("Lowest Grade", f"{valid_grades.min()}" if not valid_grades.empty else "Not Set")
+                    elif selected_grade_status == "Failed - Below 75":
+                        valid_grades_by_status = (df['Grade_num'].notna()) & (df['Grade_num'] < 75)
+                        df = df[valid_grades_by_status]
 
+                    elif selected_grade_status == "Passed - Above 75":
+                        valid_grades_by_status = (df['Grade_num'].notna()) & (df['Grade_num'] >= 75)
+                        df = df[valid_grades_by_status]
+                
+                if min_grade is not None and max_grade is not None:
+                    valid_grades_in_range = (df['Grade_num'] >= min_grade) & (df['Grade_num'] <= max_grade)
+                    df = df[valid_grades_in_range]
+                
+                
+                st.success(f"✅ Successfully loaded query data for {len(df)} students under {current_faculty} - {selected_subject_display}{subjectClass}")
                 
                 display_grades_table(
                     new_curriculum, 
@@ -366,6 +393,7 @@ def show_faculty_tab6_info(new_curriculum):
                     selected_subject_display,
                     selected_grade_status,
                     student_name_filter,
+                    selected_section_label,
                     min_grade,
                     max_grade
                 )
@@ -380,7 +408,7 @@ def show_faculty_tab6_info(new_curriculum):
 def generate_grades_pdf(
     faculty_name, is_new_curriculum, df,
     semester_filter=None, subject_filter=None,
-    student_name_filter=None, min_grade=None, max_grade=None,
+    student_name_filter=None,selected_section_label=None, min_grade=None, max_grade=None,
     status_filter=None  # ✅ new
 ):
     """Generate a PDF report of student grades with summary, filters, and charts"""
@@ -410,52 +438,40 @@ def generate_grades_pdf(
         elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
     if subject_filter:
         elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
+    if selected_section_label is not None and selected_section_label != " - All - ":
+        elements.append(Paragraph(f"Subject Class: {selected_section_label}", styles['Normal']))
     if student_name_filter:
         elements.append(Paragraph(f"Student Name Filter: {student_name_filter}", styles['Normal']))
     if status_filter:
         elements.append(Paragraph(f"Status Filter: {status_filter}", styles['Normal']))
+    query_result = f"{len(df)} Students" if len(df) > 1 else f"{len(df)} Student"
+    elements.append(Paragraph(f"Query Result: {len(df)} Students", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     # ---- Prepare data ----
     df["Grade_num"] = pd.to_numeric(df["grade"], errors="coerce")
 
-    # ✅ Apply status filter
-    if status_filter is not None:
-        if status_filter == "Not Set":
-            mask = (df["Grade_num"].isna()) | (df["Grade_num"] == 0)
-            df = df[mask]
-        elif status_filter == "Failed - Below 75":
-            mask = (df["Grade_num"].notna()) & (df["Grade_num"] < 75)
-            df = df[mask]
-        elif status_filter == "Passed - Above 75":
-            mask = (df["Grade_num"].notna()) & (df["Grade_num"] >= 75)
-            df = df[mask]
+    # # ✅ Apply status filter
+    # if status_filter is not None and status_filter != " - All - ":
+    #     if status_filter == "Not Set":
+    #         mask = (df["Grade_num"].isna()) | (df["Grade_num"] == 0)
+    #         df = df[mask]
+    #     elif status_filter == "Failed - Below 75":
+    #         mask = (df["Grade_num"].notna()) & (df["Grade_num"] < 75)
+    #         df = df[mask]
+    #     elif status_filter == "Passed - Above 75":
+    #         mask = (df["Grade_num"].notna()) & (df["Grade_num"] >= 75)
+    #         df = df[mask]
 
-    # ---- Quick stats ----
-    valid_grades = df["Grade_num"][(df["Grade_num"].notna()) & (df["Grade_num"] > 0)]
-    stats_data = [
-        ["Total Students", len(df)],
-        ["Class Average", f"{valid_grades.mean():.1f}" if not valid_grades.empty else "Not Set"],
-        ["Class Median", f"{valid_grades.median():.1f}" if not valid_grades.empty else "Not Set"],
-        ["Highest Grade", f"{valid_grades.max()}" if not valid_grades.empty else "Not Set"],
-        ["Lowest Grade", f"{valid_grades.min()}" if not valid_grades.empty else "Not Set"],
-    ]
-    stats_table = Table(stats_data, colWidths=[150, 150])
-    stats_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
-    ]))
-    elements.append(stats_table)
-    elements.append(Spacer(1, 12))
-
+    # if min_grade is not None and max_grade is not None:
+    #     valid_grades_in_range = (df['Grade_num'] >= min_grade) & (df['Grade_num'] <= max_grade)
+    #     df = df[valid_grades_in_range]
+    
     # ---- Grades table ----
-    table_data = [["Student ID", "Student Name", "Course", "Year Level", "Grade", "Pass/Fail"]]
+    table_data = [["Student ID", "Student Name", "Course", "Year Level","Subject Class", "Grade", "Pass/Fail"]]
     for _, row in df.iterrows():
         grade_val = pd.to_numeric(row["grade"], errors="coerce")
+        subjectClass = row["subjectCode"] + row["section"]
         if pd.isna(grade_val) or grade_val == 0:
             grade_display = "Not Set"
             grade_status = "Not Set"
@@ -467,6 +483,7 @@ def generate_grades_pdf(
             row.get("studentName", ""),
             row.get("Course", ""),
             row.get("YearLevel", ""),
+            subjectClass,
             grade_display,
             grade_status
         ])
