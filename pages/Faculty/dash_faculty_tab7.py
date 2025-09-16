@@ -52,7 +52,7 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     # Convert df for display
     df['Grade_num'] = pd.to_numeric(df['grade'], errors='coerce')
     df['Pass/Fail'] = df['Grade_num'].apply(
-        lambda g: "Not Set" if pd.isna(g) or g == 0 else ("Passed" if g >= 75 else "Failed")
+        lambda g: "Not Set" if pd.isna(g) or g == 0 else ("Pass" if g >= 75 else "Fail")
     )
 
     # Summary Table
@@ -89,7 +89,7 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     def pass_fail(g):
         if pd.isna(g) or g == 0:
             return "Not Set"
-        return "Passed" if g >= 75 else "Failed"
+        return "Pass" if g >= 75 else "Fail"
 
     def grade_with_star(g):
         if pd.isna(g) or g == 0:
@@ -121,9 +121,9 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     pass_fail_col_idx = list(display_df.columns).index("Pass/Fail")
     for row_idx, row in enumerate(table_data[1:], start=1):
         status = row[pass_fail_col_idx]
-        if status == "Passed":
+        if status == "Pass":
             table_style.add('TEXTCOLOR', (pass_fail_col_idx, row_idx), (pass_fail_col_idx, row_idx), colors.green)
-        elif status == "Failed":
+        elif status == "Fail":
             table_style.add('TEXTCOLOR', (pass_fail_col_idx, row_idx), (pass_fail_col_idx, row_idx), colors.red)
         else:
             table_style.add('TEXTCOLOR', (pass_fail_col_idx, row_idx), (pass_fail_col_idx, row_idx), colors.grey)
@@ -160,7 +160,7 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     if not pass_fail_data.empty:
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.bar(pass_fail_data["Grade Status"], pass_fail_data["Number of Students"],
-               color=["green" if x=="Passed" else "red" if x=="Failed" else "gray" for x in pass_fail_data["Grade Status"]])
+               color=["green" if x=="Pass" else "red" if x=="Fail" else "gray" for x in pass_fail_data["Grade Status"]])
         ax.set_title("Pass vs Fail")
         ax.set_xlabel("Grade Status")
         ax.set_ylabel("Number of Students")
@@ -179,7 +179,7 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
             pass_fail_data["Number of Students"],
             labels=pass_fail_data["Grade Status"],
             autopct="%1.1f%%",
-            colors=["green" if x=="Passed" else "red" if x=="Failed" else "gray" for x in pass_fail_data["Grade Status"]]
+            colors=["green" if x=="Pass" else "red" if x=="Fail" else "gray" for x in pass_fail_data["Grade Status"]]
         )
         ax.set_title("Pass vs Fail (Pie Chart)")
 
@@ -256,10 +256,10 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
             def pass_fail(g):
                 if pd.isna(g) or g == 0:
                     return "Not Set"
-                return "Passed" if g >= 75 else "Failed"
+                return "Pass" if g >= 75 else "Fail"
 
             table_data['Pass/Fail'] = table_data['Grade_num'].apply(pass_fail)
-            # table_data['Pass/Fail'] = table_data['Grade_num'].apply(lambda g: 'Passed' if g >= 75 else 'Failed')
+            # table_data['Pass/Fail'] = table_data['Grade_num'].apply(lambda g: 'Pass' if g >= 75 else 'Fail')
             def grade_with_star(grade):
                 if pd.isna(grade) or grade == 0:
                     return "Not Set"
@@ -273,9 +273,9 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
             display_df = table_data[['Student ID', 'Student Name', f"{course_column}", f"{year_column}", 'Grade', 'Pass/Fail']]
             
             def color_status(val):
-                if val == 'Passed':
+                if val == 'Pass':
                     return 'color: green'
-                elif val == 'Failed':
+                elif val == 'Fail':
                     return 'color: red'
                 else:
                     return 'color: gray'
