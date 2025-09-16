@@ -501,7 +501,6 @@ def show_student_dashboard_old():
                         file_name="grade_comparison.pdf",
                         mime="application/pdf"
                     )
-
         with tab4:
             df = pd.DataFrame(grades)
             df = df.drop(columns=["_id", "StudentID", "SemesterID"], errors="ignore")
@@ -625,9 +624,9 @@ def show_student_dashboard_new():
         "Curriculum Vitae"
     ])
 
-    # ---------------- Tab 1 ----------------
+    
     with tab1:
-        # --- Get logged-in student ---
+    # --- Get logged-in student ---
         user_data = st.session_state.get("user_data", {})
         logged_in_refid = str(user_data.get("_id", "N/A"))
         logged_in_name = user_data.get("Name", "Unknown User")
@@ -638,8 +637,40 @@ def show_student_dashboard_new():
             grades_df = pd.DataFrame(new_grades)
 
             # ✅ Filter for logged-in student
-            grades_df = grades_df[grades_df["StudentID"] == int(logged_in_refid)]
+            if logged_in_refid.isdigit():
+                grades_df = grades_df[grades_df["StudentID"] == int(logged_in_refid)]
+            else:
+                grades_df = pd.DataFrame()  # no valid student
 
+            # --- Load student info ---
+            course = "N/A"
+            try:
+                students = pd.read_pickle("pkl/new_students.pkl")
+                students_df = pd.DataFrame(students)
+                student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+
+                if not student_info.empty:
+                    course = student_info.iloc[0].get("Course", "N/A")
+            except Exception:
+                course = user_data.get("Course", "N/A")
+
+            # --- Compute total average ---
+            total_avg = None
+            if not grades_df.empty:
+                all_grades = grades_df["Grades"].explode()
+                all_grades = pd.to_numeric(all_grades, errors="coerce").dropna()
+                total_avg = all_grades.mean() if not all_grades.empty else None
+
+            # --- 🎯 Display header (always visible) ---
+            st.markdown("### 🧑 Student Information")
+            st.write(f"**Name:** {logged_in_name}")
+            st.write(f"**Course:** {course}")
+            if total_avg is not None:
+                st.write(f"**Total Average:** {total_avg:.2f}")
+            else:
+                st.write("**Total Average:** N/A")
+
+            # --- Proceed only if grades exist ---
             if grades_df.empty:
                 st.info("No grades found for this student.")
             else:
@@ -677,17 +708,21 @@ def show_student_dashboard_new():
                 transcript_data = {}
                 semester_avgs = []
 
+
                 # --- 🔹 General Grade Summary ---
+                st.subheader("📊 General Grade Summary")
                 all_grades = grades_df["Grades"].explode()  # flatten list of grades
                 all_grades = pd.to_numeric(all_grades, errors="coerce").dropna()
 
                 if not all_grades.empty:
                     summary_df = pd.DataFrame([{
-                        "MEAN": all_grades.mean(),
-                        "MEDIAN": all_grades.median(),
-                        "HIGHEST": all_grades.max(),
-                        "LOWEST": all_grades.min()
+                        "MEAN": round(all_grades.mean(), 2),
+                        "MEDIAN": round(all_grades.median(), 2),
+                        "HIGHEST": round(all_grades.max(), 2),
+                        "LOWEST": round(all_grades.min(), 2)
                     }])
+                    st.dataframe(summary_df)
+
 
                     # Remove index completely
                     summary_df.index = [""]
@@ -701,8 +736,7 @@ def show_student_dashboard_new():
                         ]
                     )
 
-                    st.subheader("📊 General Grade Summary")
-                    st.dataframe(styled_summary, use_container_width=True, height=80)
+                    
                     st.subheader("📊 My Grades by Semester")
 
                 # --- Group by SchoolYear + Semester ---
@@ -938,162 +972,222 @@ def show_student_dashboard_new():
         except Exception as e:
             st.error(f"❌ Error loading grades: {e}")
     with tab2:
-            failed_subjects = []  # collect all failed rows
+        failed_subjects = []  # collect all failed rows
 
-# --- Group by SchoolYear + Semester ---
-            if "SchoolYear" in grades_df.columns and "Semester" in grades_df.columns:
-                grouped = grades_df.groupby(["SchoolYear", "Semester"])
+        # --- Load all grades for student counting ---
+        all_grades_df = pd.read_pickle("pkl/new_grades.pkl")
+        all_grades_df = pd.DataFrame(all_grades_df)
 
-                for (sy, sem), sem_df in grouped:
-                    # Handle expanded grades
-                    if sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
-                        expanded = pd.DataFrame({
-                            "SubjectCode": sem_df["SubjectCodes"].explode().values,
-                            "Teacher": sem_df["Teachers"].explode().values,
-                            "Grade": sem_df["Grades"].explode().values
-                        })
-                    else:
-                        expanded = sem_df[["SubjectCodes", "Teachers", "Grades"]].rename(
-                            columns={"SubjectCodes": "SubjectCode", "Teachers": "Teacher", "Grades": "Grade"}
+        # --- Group by SchoolYear + Semester ---
+        if "SchoolYear" in grades_df.columns and "Semester" in grades_df.columns:
+            grouped = grades_df.groupby(["SchoolYear", "Semester"])
+
+            for (sy, sem), sem_df in grouped:
+                # Handle expanded grades
+                if sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
+                    expanded = pd.DataFrame({
+                        "SubjectCode": sem_df["SubjectCodes"].explode().values,
+                        "Teacher": sem_df["Teachers"].explode().values,
+                        "Grade": sem_df["Grades"].explode().values,
+                        "SemesterID": sem_df["SemesterID"].iloc[0],
+                        "section": sem_df["section"].iloc[0] if "section" in sem_df.columns else None,
+                        "StudentID": sem_df["StudentID"].iloc[0] if "StudentID" in sem_df.columns else None
+                    })
+                else:
+                    expanded = sem_df[["SubjectCodes", "Teachers", "Grades", "SemesterID", "section", "StudentID"]].rename(
+                        columns={"SubjectCodes": "SubjectCode", "Teachers": "Teacher", "Grades": "Grade"}
+                    )
+
+                # Merge with curriculum subjects
+                expanded = expanded.merge(
+                    subjects_df[["subjectCode", "subjectName", "units"]],
+                    left_on="SubjectCode",
+                    right_on="subjectCode",
+                    how="left"
+                ).drop(columns=["subjectCode"])
+
+                # Add semester info
+                expanded["SchoolYear"] = sy
+                expanded["Semester"] = sem
+
+                # Add status
+                expanded["Status"] = expanded["Grade"].apply(
+                    lambda x: "PASSED" if pd.to_numeric(x, errors="coerce") >= 75 else "FAILED"
+                )
+
+                # Collect failed rows
+                failed_rows = expanded[expanded["Status"] == "FAILED"].copy()
+                if not failed_rows.empty:
+                    # --- Add total student count + fail percentage ---
+                    for idx, row in failed_rows.iterrows():
+                        subject_code = row["SubjectCode"]
+                        semester_id = row["SemesterID"]
+                        section = row["section"]
+
+                        # --- Get all students for that subject ---
+                        subject_students = all_grades_df[
+                            (all_grades_df["SemesterID"] == semester_id) &
+                            (all_grades_df["section"] == section) &
+                            (all_grades_df["SubjectCodes"].apply(
+                                lambda sc: subject_code in sc if isinstance(sc, list) else sc == subject_code
+                            ))
+                        ]
+
+                        total_students = subject_students["StudentID"].nunique()
+
+                        # --- Count how many failed (<75) ---
+                        failed_count = 0
+                        if not subject_students.empty:
+                            expanded_subject = pd.DataFrame({
+                                "StudentID": subject_students["StudentID"].repeat(
+                                    subject_students["Grades"].str.len()
+                                    if subject_students["Grades"].dtype == "O" else 1
+                                ).values,
+                                "SubjectCode": subject_students["SubjectCodes"].explode().values,
+                                "Grade": subject_students["Grades"].explode().values
+                            })
+                            failed_count = expanded_subject[
+                                (expanded_subject["SubjectCode"] == subject_code) &
+                                (pd.to_numeric(expanded_subject["Grade"], errors="coerce") < 75)
+                            ]["StudentID"].nunique()
+
+                        # --- Save to row ---
+                        failed_rows.loc[idx, "TotalStudents"] = int(total_students)
+                        failed_rows.loc[idx, "FailedPercentage"] = (
+                            round((failed_count / total_students) * 100, 2) if total_students > 0 else 0
                         )
 
-                    # Merge with curriculum subjects
-                    expanded = expanded.merge(
-                        subjects_df[["subjectCode", "subjectName", "units"]],
-                        left_on="SubjectCode",
-                        right_on="subjectCode",
-                        how="left"
-                    ).drop(columns=["subjectCode"])
+                    failed_subjects.append(failed_rows)
 
-                    # Add semester info
-                    expanded["SchoolYear"] = sy
-                    expanded["Semester"] = sem
+        # ✅ Combine all failed into one table
+        if failed_subjects:
+            failed_df = pd.concat(failed_subjects, ignore_index=True)
 
-                    # Add status
-                    expanded["Status"] = expanded["Grade"].apply(
-                        lambda x: "PASSED" if pd.to_numeric(x, errors="coerce") >= 75 else "FAILED"
-                    )
+            # ✅ Make sure numeric columns are correct
+            failed_df["TotalStudents"] = failed_df["TotalStudents"].astype(int)
+            failed_df["FailedPercentage"] = failed_df["FailedPercentage"].astype(float)
 
-                    # Collect failed rows
-                    failed_rows = expanded[expanded["Status"] == "FAILED"]
-                    if not failed_rows.empty:
-                        failed_subjects.append(failed_rows)
+            # Format FailedPercentage as string with 2 decimals + %
+            failed_df["FailedPercentage"] = failed_df["FailedPercentage"].map(lambda x: f"{x:.2f}%")
 
-            # ✅ Combine all failed into one table
-            if failed_subjects:
-                failed_df = pd.concat(failed_subjects, ignore_index=True)
+            # Reorder + uppercase
+            failed_df = failed_df[[
+                "SchoolYear", "Semester", "SubjectCode", "subjectName",
+                "units", "Teacher", "Grade", "Status", "TotalStudents", "FailedPercentage"
+            ]]
+            failed_df.rename(columns=str.upper, inplace=True)
 
-                # Reorder + uppercase
-                failed_df = failed_df[["SchoolYear", "Semester", "SubjectCode", "subjectName", "units", "Teacher", "Grade", "Status"]]
-                failed_df.rename(columns=str.upper, inplace=True)
+            # Highlight failed
+            def highlight_failed(val):
+                if val == "FAILED":
+                    return "color: red; font-weight: bold;"
+                return ""
 
-                # Highlight failed
-                def highlight_failed(val):
-                    if val == "FAILED":
-                        return "color: red; font-weight: bold;"
-                    return ""
+            styled_failed = failed_df.style.applymap(highlight_failed, subset=["STATUS"])
 
-                styled_failed = failed_df.style.applymap(highlight_failed, subset=["STATUS"])
+            st.subheader("❌ All Failed Subjects")
+            st.dataframe(styled_failed, use_container_width=True)
 
-                st.subheader("❌ All Failed Subjects")
-                st.dataframe(styled_failed, use_container_width=True)
-                # --- 📄 Generate PDF for Failed Subjects ---
-                def generate_failed_pdf():
-                    buffer = io.BytesIO()
-                    doc = SimpleDocTemplate(buffer, pagesize=A4)
-                    styles = getSampleStyleSheet()
-                    elements = []
+            # --- 📄 Generate PDF for Failed Subjects ---
+            def generate_failed_pdf():
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=A4)
+                styles = getSampleStyleSheet()
+                elements = []
 
-                    # --- Load student info ---
-                    students = pd.read_pickle("pkl/new_students.pkl")
-                    students_df = pd.DataFrame(students)
+                # --- Load student info ---
+                students = pd.read_pickle("pkl/new_students.pkl")
+                students_df = pd.DataFrame(students)
 
-                    # Match logged-in student
-                    student_info = students_df[students_df["_id"] == int(logged_in_refid)]
+                # Match logged-in student
+                student_info = students_df[students_df["_id"] == int(logged_in_refid)]
 
-                    if not student_info.empty:
-                        course = student_info.iloc[0].get("Course", "N/A")
-                        year_level = student_info.iloc[0].get("YearLevel", "N/A")
-                    else:
-                        course = user_data.get("Course", "N/A")
-                        year_level = user_data.get("YearLevel", "N/A")
+                if not student_info.empty:
+                    course = student_info.iloc[0].get("Course", "N/A")
+                    year_level = student_info.iloc[0].get("YearLevel", "N/A")
+                else:
+                    course = user_data.get("Course", "N/A")
+                    year_level = user_data.get("YearLevel", "N/A")
 
-                    # --- Student Info ---
-                    elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
-                    elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
-                    elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
-                    elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
-                    elements.append(Spacer(1, 12))
+                # --- Student Info ---
+                elements.append(Paragraph(f"Student Name: {logged_in_name}", styles["Heading2"]))
+                elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
+                elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
+                elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
 
-                    # --- Table ---
-                    table_data = [failed_df.columns.tolist()] + failed_df.astype(str).values.tolist()
+                # --- Table ---
+                table_data = [failed_df.columns.tolist()] + failed_df.astype(str).values.tolist()
 
-                    # Wrap subject names so they don’t overflow
+                wrap_style = ParagraphStyle("wrap_style", fontSize=6, leading=7)
 
-                    wrap_style = ParagraphStyle("wrap_style", fontSize=6, leading=7)
+                for i in range(1, len(table_data)):  # skip header row
+                    table_data[i][3] = Paragraph(table_data[i][3], wrap_style)  # SUBJECTNAME col
 
-                    for i in range(1, len(table_data)):  # skip header row
-                        table_data[i][3] = Paragraph(table_data[i][3], wrap_style)  # SUBJECTNAME col
+                # Calculate dynamic column widths
+                page_width = doc.width
+                col_widths = [
+                    page_width * 0.07,  # SCHOOLYEAR
+                    page_width * 0.07,  # SEMESTER
+                    page_width * 0.09,  # SUBJECTCODE
+                    page_width * 0.22,  # SUBJECTNAME
+                    page_width * 0.06,  # UNITS
+                    page_width * 0.14,  # TEACHER
+                    page_width * 0.07,  # GRADE
+                    page_width * 0.08,  # STATUS
+                    page_width * 0.1,   # TOTALSTUDENTS
+                    page_width * 0.1,   # FAILEDPERCENTAGE
+                ]
 
-                    # Calculate dynamic column widths to fit page
-                    page_width = doc.width
-                    col_widths = [
-                        page_width * 0.1,  # SCHOOLYEAR
-                        page_width * 0.1,  # SEMESTER
-                        page_width * 0.1,  # SUBJECTCODE
-                        page_width * 0.28, # SUBJECTNAME (widest)
-                        page_width * 0.07, # UNITS
-                        page_width * 0.17, # TEACHER
-                        page_width * 0.08, # GRADE
-                        page_width * 0.1,  # STATUS
-                    ]
-
-                    table = Table(
-                        table_data,
-                        repeatRows=1,
-                        hAlign="LEFT",
-                        colWidths=col_widths
-                    )
-
-                    table.setStyle(TableStyle([
-                        ("BACKGROUND", (0, 0), (-1, 0), colors.red),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
-                        ("FONTSIZE", (0, 0), (-1, -1), 6),  # smaller text to fit
-                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ]))
-
-                    elements.append(table)
-                    elements.append(Spacer(1, 12))
-
-                    # --- Conclusion ---
-                    elements.append(Paragraph("Conclusion", styles["Heading3"]))
-                    conclusion_text = """
-                    The above list summarizes all subjects where the student received a failing grade (< 75). 
-                    This information can be used to identify areas for improvement and for academic advising.
-                    """
-                    elements.append(Paragraph(conclusion_text, styles["Normal"]))
-
-                    # Build PDF
-                    doc.build(elements)
-                    buffer.seek(0)
-                    return buffer
-
-                pdf_failed_buffer = generate_failed_pdf()
-                st.download_button(
-                    label="📄 Download Failed Subjects PDF",
-                    data=pdf_failed_buffer,
-                    file_name=f"{logged_in_name}_Failed_Subjects.pdf",
-                    mime="application/pdf"
+                table = Table(
+                    table_data,
+                    repeatRows=1,
+                    hAlign="LEFT",
+                    colWidths=col_widths
                 )
-            else:
-                st.success("✅ No failed subjects found!")
+
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.red),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+                    ("FONTSIZE", (0, 0), (-1, -1), 6),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]))
+
+                elements.append(table)
+                elements.append(Spacer(1, 12))
+
+                # --- Conclusion ---
+                elements.append(Paragraph("Conclusion", styles["Heading3"]))
+                conclusion_text = """
+                The above list summarizes all subjects where the student received a failing grade (< 75).
+                The percentage column also shows how many of the enrolled students failed that subject.
+                """
+                elements.append(Paragraph(conclusion_text, styles["Normal"]))
+
+                # Build PDF
+                doc.build(elements)
+                buffer.seek(0)
+                return buffer
+
+            pdf_failed_buffer = generate_failed_pdf()
+            st.download_button(
+                label="📄 Download Failed Subjects PDF",
+                data=pdf_failed_buffer,
+                file_name=f"{logged_in_name}_Failed_Subjects.pdf",
+                mime="application/pdf"
+            )
+        else:
+            st.success("✅ No failed subjects found!")
+
+  
+
     with tab3:
         st.markdown("""
-            **Comparison Legend:**  
-            🟢  : Above Average  🔵  : Equal to Average  🔴  : Below Average
-            """)
+        **Comparison Legend:**  
+        🟢  : Above Average  🔵  : Equal to Average  🔴  : Below Average
+        """)
 
         # --- Get logged-in student ---
         user_data = st.session_state.get("user_data", {})
@@ -1105,25 +1199,55 @@ def show_student_dashboard_new():
             new_grades = pd.read_pickle("pkl/new_grades.pkl")
             grades_df = pd.DataFrame(new_grades)
 
-            # ✅ Compute class average grades per subject (all students)
+            # ✅ Total number of unique students
+            total_students = grades_df["StudentID"].nunique()
+            st.info(f"👩‍🎓 Total Students in System: {total_students}")
+
+            # ✅ Expand SubjectCodes/Grades into rows
             all_subject_grades = []
             for _, row in grades_df.iterrows():
                 if isinstance(row["SubjectCodes"], list):
                     for subj, grade in zip(row["SubjectCodes"], row["Grades"]):
-                        all_subject_grades.append({"SubjectCode": subj, "Grade": grade})
+                        all_subject_grades.append({
+                            "StudentID": row["StudentID"],
+                            "SubjectCode": subj,
+                            "Grade": grade,
+                            "section": row.get("section", "N/A"),
+                            "SemesterID": row.get("SemesterID", None)
+                        })
                 else:
-                    all_subject_grades.append({"SubjectCode": row["SubjectCodes"], "Grade": row["Grades"]})
+                    all_subject_grades.append({
+                        "StudentID": row["StudentID"],
+                        "SubjectCode": row["SubjectCodes"],
+                        "Grade": row["Grades"],
+                        "section": row.get("section", "N/A"),
+                        "SemesterID": row.get("SemesterID", None)
+                    })
 
             all_subject_grades_df = pd.DataFrame(all_subject_grades)
             all_subject_grades_df["Grade"] = pd.to_numeric(all_subject_grades_df["Grade"], errors="coerce")
 
+            # ✅ Class average per subject + section + SemesterID
             subject_avg_df = (
-                all_subject_grades_df.groupby("SubjectCode")["Grade"]
+                all_subject_grades_df.groupby(["SubjectCode", "section", "SemesterID"])["Grade"]
                 .mean()
                 .reset_index()
                 .rename(columns={"Grade": "ClassAverage"})
             )
             subject_avg_df["ClassAverage"] = subject_avg_df["ClassAverage"].round(2)
+
+            # ✅ Total student count per subject + section + SemesterID
+            subject_count_df = (
+                all_subject_grades_df.groupby(["SubjectCode", "section", "SemesterID"])
+                .size()
+                .reset_index(name="TotalStudent")
+            )
+
+            # ✅ Student rank per subject + section + SemesterID
+            all_subject_grades_df["Rank"] = (
+                all_subject_grades_df.groupby(["SubjectCode", "section", "SemesterID"])["Grade"]
+                .rank(method="min", ascending=False)
+            )
 
             # ✅ Filter for logged-in student only
             student_grades_df = grades_df[grades_df["StudentID"] == int(logged_in_refid)]
@@ -1161,12 +1285,12 @@ def show_student_dashboard_new():
                 # ✅ Store semester-wise tables for PDF later
                 semester_comparison = {}
 
-                # --- Group by SchoolYear + Semester ---
+                # --- Group by SchoolYear + Semester + Section ---
                 if "SchoolYear" in student_grades_df.columns and "Semester" in student_grades_df.columns:
-                    grouped = student_grades_df.groupby(["SchoolYear", "Semester"])
+                    grouped = student_grades_df.groupby(["SchoolYear", "Semester", "section", "SemesterID"])
 
-                    for (sy, sem), sem_df in grouped:
-                        st.subheader(f"📚 {sy} - {sem}")
+                    for (sy, sem, student_section, sem_id), sem_df in grouped:
+                        st.subheader(f"📚 {sy} - {sem} (section {student_section})")
 
                         # Handle expanded grades
                         if sem_df["SubjectCodes"].apply(lambda x: isinstance(x, list)).any():
@@ -1188,25 +1312,59 @@ def show_student_dashboard_new():
                             how="left"
                         ).drop(columns=["subjectCode"])
 
-                        # ✅ Merge with class average per subject
-                        expanded = expanded.merge(subject_avg_df, on="SubjectCode", how="left")
+                        # ✅ Add Section + SemesterID
+                        expanded["section"] = student_section
+                        expanded["SemesterID"] = sem_id
+
+                        # ✅ Merge with total student count
+                        expanded = expanded.merge(
+                            subject_count_df,
+                            on=["SubjectCode", "section", "SemesterID"],
+                            how="left"
+                        )
+
+                        # ✅ Merge with class average
+                        expanded = expanded.merge(
+                            subject_avg_df,
+                            on=["SubjectCode", "section", "SemesterID"],
+                            how="left"
+                        )
+
+                        # ✅ Merge with student rank
+                        expanded = expanded.merge(
+                            all_subject_grades_df[["SubjectCode", "section", "SemesterID", "StudentID", "Rank"]],
+                            left_on=["SubjectCode", "section", "SemesterID"],
+                            right_on=["SubjectCode", "section", "SemesterID"],
+                            how="left"
+                        )
+
+                        # ✅ Keep only the logged-in student's rank
+                        expanded = expanded[expanded["Rank"].notna()].drop_duplicates(subset=["SubjectCode"])
 
                         # ✅ Add comparison column
                         expanded["Comparison"] = expanded.apply(
                             lambda row: (
                                 "🟢 Above Average" if row["Grade"] > row["ClassAverage"]
-                                else "🔵 Equal To Average " if row["Grade"] == row["ClassAverage"]
-                                else "🔴 Below Average "
+                                else "🔵 Equal To Average" if row["Grade"] == row["ClassAverage"]
+                                else "🔴 Below Average"
                             ),
                             axis=1
                         )
 
+                        # ✅ Rank string (e.g., "3/40")
+                        expanded["RANK"] = expanded.apply(
+                            lambda row: f"{int(row['Rank'])}/{int(row['TotalStudent'])}", axis=1
+                        )
+
                         # ✅ Reorder columns
-                        expanded = expanded[["SubjectCode", "subjectName", "units", "Teacher", "Grade", "ClassAverage", "Comparison"]]
+                        expanded = expanded[
+                            ["SubjectCode", "subjectName", "units", "Teacher", "Grade",
+                            "ClassAverage", "Comparison", "TotalStudent", "RANK"]
+                        ]
                         expanded.rename(columns=str.upper, inplace=True)
 
                         # ✅ Save for PDF
-                        semester_comparison[f"{sy} - {sem}"] = expanded.copy()
+                        semester_comparison[f"{sy} - {sem} (section {student_section})"] = expanded.copy()
 
                         # Show table
                         st.dataframe(expanded, use_container_width=True)
@@ -1237,15 +1395,17 @@ def show_student_dashboard_new():
                     elements.append(Paragraph(f"Reference ID: {logged_in_refid}", styles["Normal"]))
                     elements.append(Paragraph(f"Course: {course}", styles["Normal"]))
                     elements.append(Paragraph(f"Year Level: {year_level}", styles["Normal"]))
+                    elements.append(Paragraph(f"Total Students in System: {total_students}", styles["Normal"]))
                     elements.append(Spacer(1, 12))
+
                     # --- Custom wrap style for subject names ---
-                    wrap_style = ParagraphStyle(name="Wrap", fontSize=6, leading=7, alignment=1)  # alignment=1 = center
+                    wrap_style = ParagraphStyle(name="Wrap", fontSize=6, leading=7, alignment=1)
 
                     # --- Add semester tables ---
                     for sem, sem_df in semester_comparison.items():
                         elements.append(Paragraph(f"<b>{sem}</b>", styles["Heading3"]))
 
-                        # Convert subject names to Paragraphs for wrapping
+                        # Wrap subject names
                         sem_df = sem_df.copy()
                         sem_df["SUBJECTNAME"] = sem_df["SUBJECTNAME"].apply(
                             lambda x: Paragraph(str(x), wrap_style)
@@ -1254,16 +1414,18 @@ def show_student_dashboard_new():
                         # Convert dataframe to list of lists
                         table_data = [sem_df.columns.tolist()] + sem_df.values.tolist()
 
-                        # Column widths to fit page
+                        # Column widths
                         page_width = doc.width
                         col_widths = [
-                            page_width * 0.12,  # SubjectCode
-                            page_width * 0.28,  # SubjectName (wrapped)
-                            page_width * 0.08,  # Units
-                            page_width * 0.18,  # Teacher
-                            page_width * 0.1,   # Grade
-                            page_width * 0.12,  # ClassAverage
+                            page_width * 0.08,  # SubjectCode
+                            page_width * 0.22,  # SubjectName
+                            page_width * 0.06,  # Units
+                            page_width * 0.15,  # Teacher
+                            page_width * 0.08,  # Grade
+                            page_width * 0.09,  # ClassAverage
                             page_width * 0.12,  # Comparison
+                            page_width * 0.10,  # TotalStudent
+                            page_width * 0.10,  # Rank
                         ]
 
                         table = Table(table_data, repeatRows=1, hAlign="LEFT", colWidths=col_widths)
@@ -1281,7 +1443,8 @@ def show_student_dashboard_new():
                     # --- Conclusion ---
                     conclusion_text = """
                     This comparison highlights how the student’s performance compares with the overall class average 
-                    for each subject. 🟢 indicates above average, 🔵 equal to average, and 🔴 below average.
+                    and their rank among classmates (based on section and semester). 🟢 indicates above average, 
+                    🔵 equal to average, 🔴 below average. Rank is shown as Position/Total Students.
                     """
                     elements.append(Paragraph("Conclusion", styles["Heading3"]))
                     elements.append(Paragraph(conclusion_text, styles["Normal"]))
@@ -1301,6 +1464,7 @@ def show_student_dashboard_new():
 
         except Exception as e:
             st.error(f"Error: {e}")
+
     with tab4:
         user_data = st.session_state.get("user_data", {})
         logged_in_refid = str(user_data.get("_id", "N/A"))
