@@ -329,6 +329,8 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
             columns={"_id_x": "CurriculumID", "_id_y": "StudentID", "yearLevel": "SubjectYearLevel"}
         ).drop(columns=["courseName","_id"])
 
+        
+
         grades_flat = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
 
         grades_flat = grades_flat.rename(columns={
@@ -338,7 +340,8 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
             "Teachers": "Teacher"
         }).reset_index(drop=True)
         
-        
+        print(grades_flat.head(2))
+
         curriculum_with_grades = students_with_curriculum.merge(
             grades_flat,
             on=["StudentID", "subjectCode", "SemesterID"], 
@@ -351,7 +354,7 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
         curriculum_with_grades["Grade"] = curriculum_with_grades["Grade"].fillna("")
         results = curriculum_with_grades[[
             "Semester", "SchoolYear", "YearLevel", "subjectCode", "Description", "Units",
-            "Name", "Grade", "StudentID", "Course", "SubjectYearLevel"
+            "Name", "Grade", "StudentID", "Course", "SubjectYearLevel", "section"
         ]].rename(columns={
             "Semester": "semester",
             "SchoolYear": "schoolYear",
@@ -362,8 +365,8 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
         })
         
         results = results.sort_values(
-            by=["semester", "YearLevel", "subjectCode", "studentName"],
-            ascending=[True, True, True, True]
+            by=["semester", "YearLevel", "subjectCode", "section", "studentName"],
+            ascending=[True, True, True, True, True]
         )
         
         return results.to_dict("records")

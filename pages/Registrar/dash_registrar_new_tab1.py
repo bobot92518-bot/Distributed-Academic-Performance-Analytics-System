@@ -1,21 +1,212 @@
 import streamlit as st
-import altair as alt
-import pandas as pd 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+import streamlit.components.v1 as components
+### Ensure we scroll back to the teacher evaluation section if hash is present
+components.html(
+    '<script>window.addEventListener("load", function(){ if(location.hash=="#teacher-eval-anchor"){ setTimeout(function(){ try{ document.getElementById("teacher-eval-anchor").scrollIntoView({behavior:"instant", block:"start"}); }catch(e){} }, 0); }});</script>',
+    height=0,
+)
+import pandas as pd
+import os
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
+from pages.Registrar.pdf_helper import generate_pdf
+from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
+from global_utils import result_records_to_dataframe
+from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.units import inch
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from io import BytesIO
-from datetime import datetime
-import matplotlib.pyplot as plt
-# import seaborn as sns
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics import renderPDF
-from global_utils import result_records_to_dataframe
-from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
+from io import BytesIO
+from datetime import datetime
+import altair as alt
+import time
+import json
+
+@st.cache_data(ttl=300)
+def load_all_data_new():
+    """Load all data using the new pickle files for students, grades, and subjects."""
+    start_time = time.time()
+
+    new_students_path = "pkl/new_students.pkl"
+    new_grades_path = "pkl/new_grades.pkl"
+    new_subjects_path = "pkl/new_subjects.pkl"
+    new_teachers_path = "pkl/new_teachers.pkl"
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            'students': executor.submit(pkl_data_to_df, new_students_path),
+            'grades': executor.submit(pkl_data_to_df, new_grades_path),
+            'semesters': executor.submit(pkl_data_to_df, semesters_cache),
+            'subjects': executor.submit(pkl_data_to_df, new_subjects_path),
+            'teachers_new': executor.submit(pkl_data_to_df, new_teachers_path),
+        }
+
+        data = {}
+        for key, future in futures.items():
+            data[key] = future.result()
+
+    # Choose teachers source: prefer new_teachers, else old, else infer
+    teachers_new_df = data.get('teachers_new') if isinstance(data.get('teachers_new'), pd.DataFrame) else pd.DataFrame()
+    teachers_old_df = data.get('teachers_old') if isinstance(data.get('teachers_old'), pd.DataFrame) else pd.DataFrame()
+    teachers_df = pd.DataFrame()
+    if not teachers_new_df.empty:
+        teachers_df = teachers_new_df
+    elif not teachers_old_df.empty:
+        teachers_df = teachers_old_df
+    else:
+        # Infer from subjects or grades if possible
+        subjects_df = data.get('subjects', pd.DataFrame())
+        grades_df = data.get('grades', pd.DataFrame())
+        inferred = pd.DataFrame()
+        if 'Teacher' in subjects_df.columns:
+            inferred = pd.DataFrame({
+                'Teacher': subjects_df['Teacher'].dropna().unique().tolist()
+            })
+            inferred['_id'] = inferred['Teacher']
+        elif 'Teachers' in grades_df.columns:
+            # explode teachers from grades
+            tmp = grades_df[['Teachers']].copy()
+            tmp = tmp[tmp['Teachers'].notna()]
+            tmp = tmp.explode('Teachers') if tmp['Teachers'].apply(lambda x: isinstance(x, list)).any() else tmp
+            inferred = pd.DataFrame({'_id': tmp['Teachers'].dropna().astype(str).unique().tolist()})
+            inferred['Teacher'] = inferred['_id']
+        teachers_df = inferred
+
+    data['teachers'] = teachers_df
+
+    load_time = time.time() - start_time
+    st.success(f"📊 Data (new) loaded in {load_time:.2f} seconds")
+
+    # Log ingestion results
+    log_data = {
+        'timestamp': time.time(),
+        'load_time_seconds': load_time,
+        'records_loaded': {
+            'students_new': len(data['students']),
+            'grades_new': len(data['grades']),
+            'semesters': len(data['semesters']),
+            'subjects_new': len(data['subjects']),
+            'teachers': len(data['teachers'])
+        }
+    }
+
+    os.makedirs('cache', exist_ok=True)
+    with open('cache/ingestion_log.json', 'w') as f:
+        json.dump(log_data, f, indent=2)
+
+    return data
+
+@st.cache_data(ttl=300)
+def load_curriculums_df():
+    """Load curriculums from pickle and return a DataFrame with expected columns."""
+    if not os.path.exists(curriculums_cache):
+        return pd.DataFrame()
+    data = pd.read_pickle(curriculums_cache)
+    df = pd.DataFrame(data) if isinstance(data, list) else data
+    for col in ["courseCode", "courseName", "curriculumYear", "subjects"]:
+        if col not in df.columns:
+            df[col] = None
+    return df
+
+# def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
+#     grades_df = data['grades']
+#     subjects_df = data['subjects']
+
+#     st.subheader("👩‍🏫 Class List per Teacher")
+#     st.markdown("Select a teacher, then pick a subject to see the class roster.")
+
+#     cc1, cc2 = st.columns(2)
+#     with cc1:
+#         cl_teacher_opts = teachers_df["Teacher"].dropna().unique().tolist() if not teachers_df.empty else []
+#         cl_teacher = st.selectbox("Teacher", cl_teacher_opts, key="cls1_teacher")
+#     with cc2:
+#         st.write("")
+
+#     # Build expanded roster for teacher and subject selection
+#     def _expand_rows_cls1(gr):
+#         out = []
+#         grades_list = gr.get("Grades", [])
+#         subjects_list = gr.get("SubjectCodes", [])
+#         teachers_list = gr.get("Teachers", [])
+#         grades_list = grades_list if isinstance(grades_list, list) else [grades_list]
+#         subjects_list = subjects_list if isinstance(subjects_list, list) else [subjects_list]
+#         teachers_list = teachers_list if isinstance(teachers_list, list) else [teachers_list]
+#         n = max(len(grades_list), len(subjects_list), len(teachers_list)) if max(len(grades_list), len(subjects_list), len(teachers_list)) > 0 else 0
+#         for i in range(n):
+#             out.append({
+#                 "StudentID": gr.get("StudentID"),
+#                 "SemesterID": gr.get("SemesterID"),
+#                 "TeacherID": teachers_list[i] if i < len(teachers_list) else None,
+#                 "SubjectCode": subjects_list[i] if i < len(subjects_list) else None,
+#             })
+#         return out
+
+#     # Merge necessary student info
+#     cl_merged = grades_df.merge(students_df[["_id", "Name", "Course", "YearLevel"]], left_on="StudentID", right_on="_id", how="left")
+
+#     # No term filters in Tab 1 (use all records for teacher/subject)
+
+#     # Expand rows
+#     cls_expanded = []
+#     for _, rr in cl_merged.iterrows():
+#         cls_expanded.extend(_expand_rows_cls1(rr))
+
+#     if not cls_expanded:
+#         st.info("No records found. Adjust filters above.")
+#     else:
+#         cl_df = pd.DataFrame(cls_expanded)
+#         # Maps
+#         tmap = dict(zip(teachers_df["_id"], teachers_df["Teacher"])) if not teachers_df.empty else {}
+#         smap = dict(zip(subjects_df["_id"], subjects_df["Description"])) if not subjects_df.empty else {}
+#         semmap = dict(zip(semesters_df["_id"], semesters_df["Semester"])) if not semesters_df.empty else {}
+#         name_map = dict(zip(students_df["_id"], students_df["Name"])) if not students_df.empty else {}
+#         course_map = dict(zip(students_df["_id"], students_df["Course"])) if not students_df.empty else {}
+#         year_map = dict(zip(students_df["_id"], students_df["YearLevel"])) if not students_df.empty else {}
+
+#         cl_df["Teacher"] = cl_df["TeacherID"].map(tmap).fillna(cl_df["TeacherID"].astype(str))
+#         cl_df["Subject"] = cl_df["SubjectCode"].map(smap).fillna(cl_df["SubjectCode"].astype(str))
+#         cl_df["Semester"] = cl_df["SemesterID"].map(semmap).fillna(cl_df["SemesterID"].astype(str))
+#         cl_df["StudentName"] = cl_df["StudentID"].map(name_map).fillna(cl_df["StudentID"].astype(str))
+#         cl_df["Course"] = cl_df["StudentID"].map(course_map)
+#         cl_df["YearLevel"] = cl_df["StudentID"].map(year_map)
+
+#         # Filter by teacher
+#         if cl_teacher != "All":
+#             cl_df = cl_df[cl_df["Teacher"] == cl_teacher]
+
+#         if cl_df.empty:
+#             st.info("No classes for the selected teacher.")
+#         else:
+#             # Subject radio under selected teacher
+#             subj_opts = sorted(cl_df["Subject"].dropna().unique().tolist())
+#             sel_subj = st.radio("Subject", subj_opts, horizontal=False, key="cls1_subject_radio") if subj_opts else None
+
+#             if not sel_subj:
+#                 st.info("Choose a subject to view the class list.")
+#             else:
+#                 df_class = cl_df[cl_df["Subject"] == sel_subj]
+#                 st.success(f"Found {df_class['StudentID'].nunique()} students for {sel_subj}.")
+#                 show_cols = ["StudentID", "StudentName", "Course", "YearLevel", "Semester"]
+#                 st.subheader("Students by Year Level and Semester")
+#                 for year_level in sorted(df_class["YearLevel"].dropna().unique().tolist()):
+#                     st.markdown(f"**Year Level: {year_level}**")
+#                     df_year = df_class[df_class["YearLevel"] == year_level]
+#                     for sem_name in sorted(df_year["Semester"].dropna().unique().tolist()):
+#                         st.markdown(f"- Semester: {sem_name}")
+#                         df_sem = df_year[df_year["Semester"] == sem_name]
+#                         st.dataframe(
+#                             df_sem[show_cols]
+#                                 .sort_values(["StudentName"])
+#                                 .reset_index(drop=True),
+#                             use_container_width=True
+#                         )
 
 def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None, is_new_curriculum=False):
     """Generate PDF report for grades data"""
@@ -34,7 +225,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
         parent=styles['Heading1'],
         fontSize=18,
         spaceAfter=30,
-        alignment=TA_CENTER,
+        alignment=1,  # Center alignment
         textColor=colors.darkblue
     )
     
@@ -43,16 +234,16 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
         parent=styles['Heading2'],
         fontSize=14,
         spaceAfter=12,
-        alignment=TA_LEFT,
+        alignment=0,  # Left alignment
         textColor=colors.black
     )
-    
+
     info_style = ParagraphStyle(
         'InfoStyle',
         parent=styles['Normal'],
         fontSize=10,
         spaceAfter=6,
-        alignment=TA_LEFT
+        alignment=0  # Left alignment
     )
     
     # Title
@@ -195,7 +386,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
             'WrapStyle',
             fontSize=8,
             leading=10,
-            alignment=TA_LEFT
+            alignment=0  # Left alignment
         )
 
         # Example: convert each cell into a Paragraph
@@ -565,87 +756,94 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
     st.subheader("📄 Export Report")
     add_pdf_download_button(df, current_faculty, semester_filter, subject_filter, is_new_curriculum)
 
-def show_faculty_tab1_info(new_curriculum):
-    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
-    
+def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
+    new_curriculum = True  # Since using new data loaders
+
     # Initialize Tab 1 specific session state
     if 'tab1_grades_df' not in st.session_state:
         st.session_state.tab1_grades_df = None
     if 'tab1_current_faculty' not in st.session_state:
-        st.session_state.tab1_current_faculty = current_faculty
+        st.session_state.tab1_current_faculty = None
     if 'tab1_loaded_filters' not in st.session_state:
-        st.session_state.tab1_loaded_filters = {} 
-    
-    semesters = get_semesters_list(new_curriculum)
-    subjects = get_subjects_by_teacher(current_faculty, new_curriculum)
-    
-    col1, col2 = st.columns([1, 1])
-    
-    
-    with col1:
-        semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
-        selected_semester_display = st.selectbox(
-            "📅 Select Semester", 
-            semester_options,
-            key="main_semester"
-        )
-    with col2:
-        subject_options = [f"{subj['_id']} - {subj['Description']}" for subj in subjects]
-        selected_subject_display = st.selectbox(
-            "📚 Select Subject", 
-            subject_options,
-            key="main_subject"
-        )
-    
-    selected_semester_id = None
-    if selected_semester_display != " - All Semesters - ":
-        for sem in semesters:
-            if f"{sem['Semester']} - {sem['SchoolYear']}" == selected_semester_display:
-                selected_semester_id = sem['_id']
-                break
-    
-    selected_subject_code = None
-    if selected_subject_display != " - All Subjects - ":
-        for subj in subjects:
-            if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
-                selected_subject_code = subj['_id']
-                break
-            
-    if st.button("📊 Load Class", type="secondary", key="tab1_load_button1"):
-        with st.spinner("Loading grades data..."):
-            
-            if new_curriculum:
-                results = get_new_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
-            else:
-                results = get_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
-            
-            if results:
-                df = result_records_to_dataframe(results)
-                
-                # Store in TAB 1 SPECIFIC session state keys
-                st.session_state.tab1_grades_df = df
-                st.session_state.tab1_current_faculty = current_faculty
-                st.session_state.tab1_loaded_filters = {
-                    'semester': selected_semester_display,
-                    'subject': selected_subject_display
-                }
-                
-            else:
-                st.warning(f"No grades found for {current_faculty} in the selected semester.")
-                st.session_state.tab1_grades_df = None
-    
+        st.session_state.tab1_loaded_filters = {}
+
+    st.subheader("👥 Class List per Teacher")
+    st.markdown("Select a teacher, then pick a semester and subject to see the class roster.")
+
+    # Select teacher first
+    teacher_options = teachers_df["Teacher"].dropna().unique().tolist() if not teachers_df.empty else []
+    selected_teacher = st.selectbox("👨‍🏫 Select Teacher", teacher_options, key="registrar_teacher_select")
+
+    if selected_teacher:
+        semesters = get_semesters_list(new_curriculum)
+        subjects = get_subjects_by_teacher(selected_teacher, new_curriculum)
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
+            selected_semester_display = st.selectbox(
+                "📅 Select Semester",
+                semester_options,
+                key="main_semester"
+            )
+        with col2:
+            subject_options = [f"{subj['_id']} - {subj['Description']}" for subj in subjects]
+            selected_subject_display = st.selectbox(
+                "📚 Select Subject",
+                subject_options,
+                key="main_subject"
+            )
+
+        selected_semester_id = None
+        if selected_semester_display != " - All Semesters - ":
+            for sem in semesters:
+                if f"{sem['Semester']} - {sem['SchoolYear']}" == selected_semester_display:
+                    selected_semester_id = sem['_id']
+                    break
+
+        selected_subject_code = None
+        if selected_subject_display != " - All Subjects - ":
+            for subj in subjects:
+                if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
+                    selected_subject_code = subj['_id']
+                    break
+
+        if st.button("📊 Load Class", type="secondary", key="tab1_load_button1"):
+            with st.spinner("Loading grades data..."):
+
+                if new_curriculum:
+                    results = get_new_student_grades_by_subject_and_semester(current_faculty=selected_teacher, semester_id=selected_semester_id, subject_code=selected_subject_code)
+                else:
+                    results = get_student_grades_by_subject_and_semester(current_faculty=selected_teacher, semester_id=selected_semester_id, subject_code=selected_subject_code)
+
+                if results:
+                    df = result_records_to_dataframe(results)
+
+                    # Store in TAB 1 SPECIFIC session state keys
+                    st.session_state.tab1_grades_df = df
+                    st.session_state.tab1_current_faculty = selected_teacher
+                    st.session_state.tab1_loaded_filters = {
+                        'semester': selected_semester_display,
+                        'subject': selected_subject_display
+                    }
+
+                else:
+                    st.warning(f"No grades found for {selected_teacher} in the selected semester.")
+                    st.session_state.tab1_grades_df = None
+
     # Display grades if they exist in Tab 1 session state
     if st.session_state.tab1_grades_df is not None and not st.session_state.tab1_grades_df.empty:
         # Show current filter info for Tab 1
         if st.session_state.tab1_loaded_filters:
             st.info(f"📋 Tab 1 - Showing grades for: **{st.session_state.tab1_loaded_filters.get('semester', 'All')}** | **{st.session_state.tab1_loaded_filters.get('subject', 'All')}**")
-        
+
         st.divider()
-        display_grades_table(new_curriculum, st.session_state.tab1_grades_df, 
+        display_grades_table(new_curriculum, st.session_state.tab1_grades_df,
                            st.session_state.tab1_loaded_filters.get('semester'),
                            st.session_state.tab1_loaded_filters.get('subject'))
-        
+
     elif st.session_state.tab1_grades_df is not None and st.session_state.tab1_grades_df.empty:
         st.warning("No students found matching the current filters.")
     else:
-        st.info("👆 Select your filters and click 'Load Class' to view student data.")
+        st.info("👆 Select a teacher, then filters and click 'Load Class' to view student data.")
