@@ -103,16 +103,110 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
         5: "5th Year",
     }
     
-    # Group by semester and subject
-    grouped = filtered_df.groupby(['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel'])
+    # === Build summary table first ===
+    summary_tables = []
+    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel, section), group in filtered_df.groupby(
+        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section']
+    ):
+        table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade']].copy()
+        table_data['Grade_num'] = pd.to_numeric(table_data['grade'], errors='coerce')
+        valid_grades = table_data["Grade_num"][(table_data["Grade_num"].notna()) & (table_data["Grade_num"] > 0)]
+        
+        # only add summary row if there are valid grades
+        if not valid_grades.empty:
+            grade_brackets = {
+                "95-100": (95, 100),
+                "90-94": (90, 94),
+                "85-89": (85, 89),
+                "80-84": (80, 84),
+                "75-79": (75, 79),
+                "Below 75": (0, 74)
+            }
+
+            total_valid = len(valid_grades)
+            bracket_stats = {}
+            for bracket_name, (min_grade, max_grade) in grade_brackets.items():
+                if bracket_name == "Below 75":
+                    count = len(valid_grades[valid_grades < 75])
+                else:
+                    count = len(valid_grades[(valid_grades >= min_grade) & (valid_grades <= max_grade)])
+                percentage = (count / total_valid * 100) if total_valid > 0 else 0
+                bracket_stats[bracket_name] = f"{percentage:.1f}%"
+
+            summary_tables.append({
+                "Subject Code": f"{subject_code}{section}",
+                "Subject Name": subject_desc,
+                **bracket_stats,
+                "Total Students": len(table_data)
+            })
+
+    # Add summary table to PDF if we have data
+    if summary_tables:
+        elements.append(Paragraph(f"{subject_code}-{subject_desc} Subject Grade Distribution Summary Per Section", header_style))
+        elements.append(Spacer(1, 12))
+        
+        # Create summary table header
+        summary_headers = ["Subject Code", "Subject Name", "95-100", "90-94", "85-89", "80-84", "75-79", "Below 75", "Total Students"]
+        summary_data = [summary_headers]
+        
+        for summary in summary_tables:
+            row = [
+                summary["Subject Code"],
+                summary["Subject Name"],
+                summary["95-100"],
+                summary["90-94"], 
+                summary["85-89"],
+                summary["80-84"],
+                summary["75-79"],
+                summary["Below 75"],
+                str(summary["Total Students"])
+            ]
+            summary_data.append(row)
+        
+        # Create wrapped style for summary table
+        summary_wrap_style = ParagraphStyle(
+            'SummaryWrapStyle',
+            fontSize=8,
+            leading=10,
+            alignment=TA_CENTER
+        )
+
+        # Convert summary table cells to Paragraphs for better wrapping
+        def wrap_summary_text(cell):
+            if isinstance(cell, str):
+                return Paragraph(cell, summary_wrap_style)
+            return cell
+
+        summary_data_wrapped = [[wrap_summary_text(cell) for cell in row] for row in summary_data]
+        
+        # Create summary table with appropriate column widths
+        summary_table = Table(summary_data_wrapped, colWidths=[1*inch, 1.5*inch, 0.6*inch, 0.6*inch, 0.6*inch, 0.6*inch, 0.6*inch, 0.7*inch, 0.8*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        
+        elements.append(summary_table)
+        elements.append(Spacer(1, 20))
     
-    for i, ((semester, school_year, subject_code, subject_desc, subject_year_level), group) in enumerate(grouped):
+    # Group by semester, subject, and section (updated grouping)
+    grouped = filtered_df.groupby(['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section'])
+    
+    for i, ((semester, school_year, subject_code, subject_desc, subject_year_level, section), group) in enumerate(grouped):
         
         if i > 0:
             elements.append(PageBreak())
         
-        # Subject header
-        subject_header = f"{semester} - {school_year} | {subject_code} - {subject_desc}"
+        # Subject header (updated to include section)
+        subject_header = f"{semester} - {school_year} | {subject_code} {section} - {subject_desc}"
         if subject_year_level and subject_year_level > 0:
             subject_header += f" ({year_map.get(subject_year_level, '')} Subject)"
         
@@ -157,87 +251,6 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
         elements.append(stats_table)
         elements.append(Spacer(1, 20))
         
-        # Prepare grade data for main table
-        def format_grade(grade):
-            if pd.isna(grade) or grade == 0:
-                return "Not Set"
-            else:
-                return f"{grade:.1f}"
-        
-        table_data['Formatted_Grade'] = table_data['Grade_num'].apply(format_grade)
-        
-        # Prepare main data table
-        if is_new_curriculum:
-            year_taken = year_map.get(subject_year_level, "")
-            year_course = (table_data["YearLevel"].map(year_map).fillna("") + " - " + table_data["Course"])
-            
-            main_data = [['Student ID', 'Student Name', 'Year-Course', 'Year Taken', 'Grade']]
-            for _, row in table_data.iterrows():
-                main_data.append([
-                    row['Student ID'],
-                    row['studentName'],
-                    f"{year_map.get(row['YearLevel'], '')} - {row['Course']}",
-                    year_taken,
-                    row['Formatted_Grade']
-                ])
-        else:
-            main_data = [['Student ID', 'Student Name', 'Course', 'Year Level', 'Grade']]
-            for _, row in table_data.iterrows():
-                main_data.append([
-                    row['Student ID'],
-                    row['studentName'],
-                    row['Course'],
-                    year_map.get(row['YearLevel'], ''),
-                    row['Formatted_Grade']
-                ])
-        
-        wrap_style = ParagraphStyle(
-            'WrapStyle',
-            fontSize=8,
-            leading=10,
-            alignment=TA_LEFT
-        )
-
-        # Example: convert each cell into a Paragraph
-        def wrap_text(cell):
-            if isinstance(cell, str):
-                return Paragraph(cell, wrap_style)
-            return cell
-
-        main_data_wrapped = [[wrap_text(cell) for cell in row] for row in main_data]
-        # Create main table
-        main_table = Table(main_data_wrapped, colWidths=[1*inch, 2*inch, 1.5*inch, 1*inch, 0.8*inch])
-        
-        # Style the main table
-        table_style = [
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ]
-        
-        # Add conditional formatting for grades
-        for row_idx, row_data in enumerate(main_data[1:], 1):
-            grade_text = row_data[-1]
-            if grade_text != "Not Set":
-                try:
-                    grade_value = float(grade_text)
-                    if grade_value < 75:
-                        table_style.append(('BACKGROUND', (-1, row_idx), (-1, row_idx), colors.lightcoral))
-                    else:
-                        table_style.append(('BACKGROUND', (-1, row_idx), (-1, row_idx), colors.lightgreen))
-                except ValueError:
-                    pass
-        
-        main_table.setStyle(TableStyle(table_style))
-        elements.append(main_table)
-        elements.append(Spacer(1, 20))
         
         # Add grade distribution summary
         if not valid_grades.empty:
@@ -277,11 +290,10 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
                 ('BOTTOMPADDING', (0,0), (-1,0), 12),
             ]))
             
-            elements.append(Paragraph("<b>📊 Grade Distribution by Brackets</b>", info_style))
+            elements.append(Paragraph("Grade Distribution by Brackets", info_style))
             elements.append(Spacer(1, 6))
             elements.append(dist_table)
             elements.append(Spacer(1, 20))
-            
             
             passing_count = len(valid_grades[valid_grades >= 75])
             failing_count = len(valid_grades[valid_grades < 75])
@@ -329,7 +341,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
 
             # Add chart to PDF
             elements.append(Spacer(1, 12))
-            elements.append(Paragraph("<b>📈 Grade Distribution Histogram (5-point bins)</b>", info_style))
+            elements.append(Paragraph("Grade Distribution Histogram (5-point bins)", info_style))
             drawing.add(bc)
             elements.append(drawing)
     
@@ -406,6 +418,52 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
         5: "| &nbsp; &nbsp; 5th Year Subject",
     }
     
+    # === Build summary once ===
+    summary_tables = []
+
+    # prepare all subject-section summaries
+    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel, section), group in filtered_df.groupby(
+        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section']
+    ):
+        table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade']].copy()
+        table_data['Grade_num'] = pd.to_numeric(table_data['grade'], errors='coerce')
+        valid_grades = table_data["Grade_num"][(table_data["Grade_num"].notna()) & (table_data["Grade_num"] > 0)]
+        
+        # only add summary row if there are valid grades
+        if not valid_grades.empty:
+            grade_brackets = {
+                "95-100 (%)": (95, 100),
+                "90-94 (%)": (90, 94),
+                "85-89 (%)": (85, 89),
+                "80-84 (%)": (80, 84),
+                "75-79 (%)": (75, 79),
+                "Below 75 (%)": (0, 74)
+            }
+
+            total_valid = len(valid_grades)
+            bracket_stats = {}
+            for bracket_name, (min_grade, max_grade) in grade_brackets.items():
+                if bracket_name == "Below 75 (%)":
+                    count = len(valid_grades[valid_grades < 75])
+                else:
+                    count = len(valid_grades[(valid_grades >= min_grade) & (valid_grades <= max_grade)])
+                percentage = (count / total_valid * 100) if total_valid > 0 else 0
+                bracket_stats[bracket_name] = f"{percentage:.1f}%"
+
+            summary_tables.append({
+                "Subject Code": f"{subject_code}{section}",
+                "Subject Name": subject_desc,
+                **bracket_stats,
+                "Total Students": len(table_data)
+            })
+
+    # === Show summary ONCE at the very top ===
+    if summary_tables:
+        st.markdown(f"#### 📊 {subject_code} - {subject_desc} Grade Distribution Summary Per Section")
+        summary_df = pd.DataFrame(summary_tables)
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        
+        
     # Group by semester and subject
     for (semester, school_year, subject_code, subject_desc, SubjectYearLevel, section), group in filtered_df.groupby(
         ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section']
@@ -459,11 +517,10 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
                 st.metric("Highest Grade", f"{valid_grades.max()}" if not valid_grades.empty else "N/A")
             with col4:
                 st.metric("Lowest Grade", f"{valid_grades.min()}" if not valid_grades.empty else "N/A")
-
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
             
             if not valid_grades.empty:
-                st.markdown("**📊 Grade Distribution by Brackets**")
+                st.markdown("**📈 Grade Distribution by Brackets**")
                 
                 # Define grade brackets
                 grade_brackets = {
@@ -490,15 +547,17 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
                 
                 # Create a single row table for the brackets
                 percentage_df = pd.DataFrame([{
-                    "Subject Code": subject_code,
+                    "Subject Code": f"{subject_code}{section}",
                     "Subject Name": subject_desc,
                     **bracket_stats,
                     "Total Students": len(table_data)
                 }])
                 
                 st.dataframe(percentage_df, use_container_width=True, hide_index=True)
+
+            # st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            st.markdown("**📈 Class Grade Distribution Histogram**")
+            st.markdown("**📊 Class Grade Distribution Histogram**")
 
             # Keep your grade_category function exactly as is
             def grade_category(g):
@@ -555,8 +614,8 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
                     tooltip=['count():Q', 'Grade_Range:N']
                 )
                 .properties(
-                    height=300,
-                    title="Grade Distribution Histogram"
+                    height=300
+                    # title="Grade Distribution Histogram"
                 )
             )
 

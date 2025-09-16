@@ -137,6 +137,9 @@ def get_dataframe_grades(is_new_curriculum):
         if df is None or df.empty:
             return pd.DataFrame()
 
+        if not is_new_curriculum:
+            df["section"] = ""
+
         # Ensure required columns
         required_cols = {"StudentID", "SubjectCodes", "Grades", "Teachers", "SemesterID"}
         if not required_cols.issubset(df.columns):
@@ -153,11 +156,44 @@ def get_dataframe_grades(is_new_curriculum):
             "Teachers": "Teacher"
         })
 
-        return df_exploded[["StudentID", "SubjectCode", "Grade", "Teacher", "SemesterID"]]
+        return df_exploded[["StudentID", "SubjectCode", "Grade", "Teacher", "SemesterID", "section"]]
 
     except Exception as e:
         st.error(f"Error normalizing grades: {e}")
         return pd.DataFrame()
+
+
+def get_distinct_section_per_subject(subjectCode, current_faculty):
+    try:
+        # Load cached data
+        grades_df = pkl_data_to_df(new_grades_cache)
+        # Expand arrays
+        grades_expanded = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
+
+        # Filter rows for this teacher & valid subject codes
+        grades_expanded = grades_expanded[
+            (grades_expanded["Teachers"] == current_faculty) &
+            (grades_expanded["SubjectCodes"] == subjectCode)
+        ]
+
+        if grades_expanded.empty:
+            return []
+
+        # Get distinct sections per subject
+        grouped = (
+            grades_expanded[["SubjectCodes", "section"]]
+            .drop_duplicates()
+            .groupby("SubjectCodes")["section"]
+            .apply(list)  # sections as list
+            .reset_index()
+        )
+
+        return grouped.to_dict(orient="records")
+
+    except Exception as e:
+        st.error(f"Error querying subject sections: {e}")
+        return []
+    
 
 @st.cache_data(ttl=300)
 def get_student_grades_by_subject_and_semester(current_faculty, semester_id=None, subject_code=None):
@@ -200,9 +236,11 @@ def get_student_grades_by_subject_and_semester(current_faculty, semester_id=None
             .merge(semesters_df, left_on="SemesterID", right_on="_id", suffixes=("", "_semester"))
         )
         merged["SubjectYearLevel"] = 0
+        merged["section"] = ""
+        merged["NewCourse"] = ""
         # Select relevant columns
         results = merged[[
-            "Semester", "SchoolYear", "SubjectCodes", "Description", "Units", "Name", "Grades", "YearLevel", "StudentID" , "Course", "SubjectYearLevel"
+            "Semester", "SchoolYear", "SubjectCodes", "Description", "Units", "Name", "Grades", "YearLevel", "StudentID" , "Course","NewCourse", "SubjectYearLevel","section"
         ]].rename(columns={
             "Semester": "semester",
             "SchoolYear": "schoolYear",
@@ -215,8 +253,8 @@ def get_student_grades_by_subject_and_semester(current_faculty, semester_id=None
 
         # Sort like Mongo pipeline
         results = results.sort_values(
-            by=["schoolYear", "semester", "subjectCode", "studentName"],
-            ascending=[False, True, True, True]
+            by=["schoolYear", "semester", "subjectCode","section", "studentName"],
+            ascending=[False, True, True, True, True]
         )
 
         return results.to_dict("records")
@@ -302,7 +340,7 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
 
         
         if studentYearLevel <= 0 or studentYearLevel > 4:
-            print(f"Invalid Student's Year Level of {subject_year}")
+            # print(f"Invalid Student's Year Level of {subject_year}")
             st.warning(f"Selected Semester has No Students Enrolled for Year Level:  {year_map.get(subject_year,"")}")
             # st.warning(f"No Students Admitted for this Year Level {subject_year}")
             return []
@@ -340,7 +378,6 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
             "Teachers": "Teacher"
         }).reset_index(drop=True)
         
-        print(grades_flat.head(2))
 
         curriculum_with_grades = students_with_curriculum.merge(
             grades_flat,
@@ -350,11 +387,12 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
         curriculum_with_grades = curriculum_with_grades.rename(
             columns={"_id": "GradeID"}
         )
-
+    
+        curriculum_with_grades["NewCourse"] = curriculum_with_grades["Course"]
         curriculum_with_grades["Grade"] = curriculum_with_grades["Grade"].fillna("")
         results = curriculum_with_grades[[
             "Semester", "SchoolYear", "YearLevel", "subjectCode", "Description", "Units",
-            "Name", "Grade", "StudentID", "Course", "SubjectYearLevel", "section"
+            "Name", "Grade", "StudentID","NewCourse", "Course", "SubjectYearLevel", "section"
         ]].rename(columns={
             "Semester": "semester",
             "SchoolYear": "schoolYear",
@@ -373,6 +411,130 @@ def get_new_student_grades_by_subject_and_semester(current_faculty, semester_id=
 
     except Exception as e:
         st.error(f"Error querying students: {e}")
+        return []
+
+@st.cache_data(ttl=300)
+def get_student_grades_by_semester(current_faculty, semester_id=None):
+    """Retrieve all student grades for subjects taught by a specific teacher in a given semester"""
+    try:
+        # Load datasets
+        grades_df = pkl_data_to_df(grades_cache)
+        students_df = pkl_data_to_df(students_cache)
+        subjects_df = pkl_data_to_df(subjects_cache)
+        semesters_df = pkl_data_to_df(semesters_cache)
+
+        if grades_df.empty:
+            return []
+        
+        
+        if semester_id is None:
+            st.warning(f"Selected Semester Not Found!")
+
+        # Expand SubjectCodes + Grades + Teachers into rows
+        grades_expanded = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
+
+        # Filter by teacher
+        grades_expanded = grades_expanded[grades_expanded["Teachers"] == current_faculty]
+
+        # Optional filters
+        if semester_id:
+            grades_expanded = grades_expanded[grades_expanded["SemesterID"] == semester_id]
+        
+        if grades_expanded.empty:
+            st.warning("No grades available")
+        # Join with students, subjects, semesters
+        merged = (
+            grades_expanded
+            .merge(students_df, left_on="StudentID", right_on="_id", suffixes=("", "_student"))
+            .merge(subjects_df, left_on="SubjectCodes", right_on="_id", suffixes=("", "_subject"))
+            .merge(semesters_df, left_on="SemesterID", right_on="_id", suffixes=("", "_semester"))
+        )
+        merged["section"] = ""
+        # Select relevant columns
+        results = merged[[
+            "Semester", "SchoolYear", "SubjectCodes", "Description", "Units", "Name", "Grades", "YearLevel", "StudentID" , "Course","section"
+        ]].rename(columns={
+            "Semester": "semester",
+            "SchoolYear": "schoolYear",
+            "SubjectCodes": "subjectCode",
+            "Description": "subjectDescription",
+            "Units": "units",
+            "Name": "studentName",
+            "Grades": "grade"
+        })
+
+        # Sort like Mongo pipeline
+        results = results.sort_values(
+            by=["schoolYear", "semester", "subjectCode","section", "studentName"],
+            ascending=[False, True, True, True, True]
+        )
+
+        return results.to_dict("records")
+
+    except Exception as e:
+        st.error(f"Error querying grades: {e}")
+        return []
+    
+@st.cache_data(ttl=300)
+def get_new_student_grades_by_semester(current_faculty, semester_id=None):
+    """Retrieve all student grades for subjects taught by a specific teacher in a given semester"""
+    try:
+        # Load datasets
+        grades_df = pkl_data_to_df(new_grades_cache)
+        students_df = pkl_data_to_df(new_students_cache)
+        subjects_df = pkl_data_to_df(new_subjects_cache)
+        semesters_df = pkl_data_to_df(semesters_cache)
+
+        if grades_df.empty:
+            return []
+        
+        
+        if semester_id is None:
+            st.warning(f"Selected Semester Not Found!")
+
+        # Expand SubjectCodes + Grades + Teachers into rows
+        grades_expanded = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
+
+        # Filter by teacher
+        grades_expanded = grades_expanded[grades_expanded["Teachers"] == current_faculty]
+
+        # Optional filters
+        if semester_id:
+            grades_expanded = grades_expanded[grades_expanded["SemesterID"] == semester_id]
+        
+        if grades_expanded.empty:
+            st.warning("No grades available")
+        # Join with students, subjects, semesters
+        merged = (
+            grades_expanded
+            .merge(students_df, left_on="StudentID", right_on="_id", suffixes=("", "_student"))
+            .merge(subjects_df, left_on="SubjectCodes", right_on="_id", suffixes=("", "_subject"))
+            .merge(semesters_df, left_on="SemesterID", right_on="_id", suffixes=("", "_semester"))
+        )
+        
+        # Select relevant columns
+        results = merged[[
+            "Semester", "SchoolYear", "SubjectCodes", "Description", "Units", "Name", "Grades", "YearLevel", "StudentID" , "Course","section"
+        ]].rename(columns={
+            "Semester": "semester",
+            "SchoolYear": "schoolYear",
+            "SubjectCodes": "subjectCode",
+            "Description": "subjectDescription",
+            "Units": "units",
+            "Name": "studentName",
+            "Grades": "grade"
+        })
+
+        # Sort like Mongo pipeline
+        results = results.sort_values(
+            by=["schoolYear", "semester", "subjectCode","section", "studentName"],
+            ascending=[False, True, True, True, True]
+        )
+
+        return results.to_dict("records")
+
+    except Exception as e:
+        st.error(f"Error querying grades: {e}")
         return []
 
 
@@ -576,3 +738,131 @@ def get_new_student_grades_from_db_by_subject_and_semester(current_faculty, seme
     except Exception as e:
         st.error(f"Error querying students: {e}")
         return []
+
+
+@st.cache_data(ttl=300)
+def compute_student_risk_analysis(
+    is_new_curriculum,
+    current_faculty,
+    selected_semester_id=None,
+    selected_subject_code=None,
+    passing_grade: int = 75
+):
+    # Load data
+    subjects_df = pkl_data_to_df(new_subjects_cache if is_new_curriculum else subjects_cache)
+    subjects_df = subjects_df[subjects_df["Teacher"] == current_faculty]
+    students_df = get_students_from_grades(is_new_curriculum, teacher_name=current_faculty)
+    grades_df = pkl_data_to_df(new_grades_cache if is_new_curriculum else grades_cache)
+    semesters_df = pkl_data_to_df(semesters_cache)
+    
+    if grades_df.empty:
+        return pd.DataFrame()
+
+    if selected_subject_code is None:
+        st.warning("Selected Subject Not Found!")
+    if selected_semester_id is None:
+        st.warning("Selected Semester Not Found!")
+
+    # Expand multi-value columns
+    grades_expanded = grades_df.explode(["SubjectCodes", "Grades", "Teachers"])
+    
+    if selected_semester_id:
+        grades_expanded = grades_expanded[grades_expanded["SemesterID"] == selected_semester_id]
+    if selected_subject_code:
+        grades_expanded = grades_expanded[grades_expanded["SubjectCodes"] == selected_subject_code]
+
+    # Merge data
+    merged = (
+        grades_expanded
+        .merge(students_df, on="StudentID", suffixes=("", "_student"))
+        .merge(subjects_df, left_on="SubjectCodes", right_on="_id", suffixes=("", "_subject"))
+        .merge(semesters_df, left_on="SemesterID", right_on="_id", suffixes=("", "_semester"))
+    )
+
+    if merged.empty:
+        return pd.DataFrame()
+
+    # Clean and compute grades
+    merged["Grades"] = pd.to_numeric(merged["Grades"], errors="coerce").fillna(0)
+    merged["is_fail"] = merged["Grades"] < passing_grade
+    merged["Failed_SubjectDesc"] = merged.apply(lambda r: r["Description"] if r["is_fail"] else None, axis=1)
+
+    # Risk flag
+    def get_risk_flag(grade, passing_grade):
+        if grade == 0:
+            return "Missing Grade"
+        elif grade < passing_grade:
+            return f"At Risk (<{passing_grade})"
+        else:
+            return f"On Track (>{passing_grade})"
+
+    merged["Risk Flag"] = merged["Grades"].apply(lambda x: get_risk_flag(x, passing_grade))
+    merged["Intervention Candidate"] = merged["Risk Flag"].apply(
+        lambda x: "⚠️ Needs Intervention" if "At Risk" in x or "Missing" in x else "✅ On Track"
+    )
+
+    if not is_new_curriculum:
+        merged["section"] = ""
+    
+    return merged[[
+        "StudentID", "Student", "Grades" ,"Course","Description","SubjectCodes", "Risk Flag","Intervention Candidate", "YearLevel", "section"
+    ]]
+
+
+@st.cache_data(ttl=300)
+def compute_subject_failure_rates(df, new_curriculum,current_faculty, passing_grade: int = 75, selected_semester_id = None):
+    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
+    """
+    Compute failure rates per Teacher + SubjectCode.
+    Assumes Grade < passing_grade = failure.
+    Only includes subjects handled by the given faculty.
+    """
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    if selected_semester_id is not None:
+        df = df[df["SemesterID"] == selected_semester_id]
+    
+    subjects_df = pkl_data_to_df(new_subjects_cache if new_curriculum else subjects_cache)
+
+    
+    if subjects_df is None or subjects_df.empty:
+        st.warning("Subjects data not available.")
+        return pd.DataFrame()
+    
+    subjects_df = subjects_df[subjects_df["Teacher"] == current_faculty]
+    if subjects_df.empty:
+        return pd.DataFrame()
+    
+    if not new_curriculum:
+        df["section"] = ""
+    
+    df["Grade"] = pd.to_numeric(df["Grade"], errors="coerce")
+    df["is_fail"] = df["Grade"] < passing_grade
+    df["is_dropout"] = df["Grade"] == "INC"
+
+    grouped = df.groupby(["Teacher", "SubjectCode", "section"]).agg(
+        total=("StudentID", "count"),
+        failures=("is_fail", "sum"),
+        dropouts=("is_dropout", "sum"),
+    ).reset_index()
+
+    grouped["fail_rate"] = (grouped["failures"] / grouped["total"] * 100).round(2)
+    grouped["dropout_rate"] = (grouped["dropouts"] / grouped["total"] * 100).round(2)
+    grouped = grouped[grouped["total"] > 0]
+
+    merged = grouped.merge(
+        subjects_df[["_id", "Description", "Units", "Teacher"]],
+        left_on="SubjectCode", right_on="_id", how="inner"
+    )
+
+    merged = merged.drop(columns=["_id","Teacher_x","Teacher_y"])
+    
+    merged = merged.sort_values(
+        ["fail_rate", "failures", "total", "dropout_rate","dropouts"],
+        ascending=[False, False, False, False, False]
+    )
+    
+    # st.markdown(merged.head(0))
+    return merged

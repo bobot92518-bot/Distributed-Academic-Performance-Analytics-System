@@ -2,26 +2,22 @@ import streamlit as st
 import pandas as pd 
 import plotly.express as px
 import plotly.io as pio
-import tempfile
 from io import BytesIO
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4, landscape
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.units import inch
-from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.graphics.shapes import Drawing, String
 from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics.charts.textlabels import Label
 from reportlab.lib import colors as rl_colors
 from datetime import datetime
-from global_utils import pkl_data_to_df, subjects_cache, new_subjects_cache
-from pages.Faculty.faculty_data_helper import get_dataframe_grades, get_semesters_list
+from pages.Faculty.faculty_data_helper import get_dataframe_grades, get_semesters_list, compute_subject_failure_rates
 
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
-# Initialize session state keys
+# --- Session State ---
 def initialize_session_state():
     """Initialize session state variables for tab 3"""
     if 'tab3_data_loaded' not in st.session_state:
@@ -31,78 +27,187 @@ def initialize_session_state():
     if 'tab3_last_params' not in st.session_state:
         st.session_state.tab3_last_params = {}
 
-@st.cache_data(ttl=300)
-def compute_subject_failure_rates(df, new_curriculum, passing_grade: int = 75, selected_semester_id = None):
-    """
-    Compute failure rates per Teacher + SubjectCode.
-    Assumes Grade < passing_grade = failure.
-    Only includes subjects handled by the given faculty.
-    """
-    
+
+def create_summary_table(df):
+    """Create summary table aggregating all sections per subject, with Difficulty Level"""
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), {
+            "total_subjects": 0,
+            "avg_failure_rate": 0,
+            "highest_failure_rate": 0,
+            "total_students": 0
+        }
     
-    if selected_semester_id is not None:
-        df = df[df["SemesterID"] == selected_semester_id]
+    # Group by subject only
+    summary = df.groupby(['SubjectCode', 'Description']).agg({
+        'total': 'sum',
+        'failures': 'sum',
+        'dropouts':'sum'
+    }).reset_index()
     
-    subjects_df = pkl_data_to_df(new_subjects_cache if new_curriculum else subjects_cache)
+    # Compute failure rate
+    summary['fail_rate'] = (summary['failures'] / summary['total'] * 100).round(1)
+    summary['dropout_rate'] = (summary['dropouts'] / summary['total'] * 100).round(1)
+    
+    # Add difficulty level based on failure rate
+    def get_difficulty(rate):
+        if rate >= 50:
+            return "High"
+        elif rate >= 20:
+            return "Medium"
+        else:
+            return "Low"
+    
+    summary['Difficulty Level'] = summary['fail_rate'].apply(get_difficulty)
+    
+    # Rename for display
+    summary = summary.rename(columns={
+        'SubjectCode': 'Subject Code',
+        'total': 'Total Students',
+        'failures': 'Total Failures',
+        'fail_rate': 'Failure Rate',
+        'dropout_rate': 'Dropout Rate'
+    })
+    
+    # Convert for nice display
+    summary['Failure Rate'] = summary['Failure Rate'].astype(str) + '%'
+    summary['Dropout Rate'] = summary['Dropout Rate'].astype(str) + '%'
+    summary['Total Students'] = summary['Total Students'].astype(str)
+    summary['Total Failures'] = summary['Total Failures'].astype(str)
+    
+    # Metrics
+    metrics = {
+        "total_subjects": len(summary),
+        "avg_failure_rate": df['fail_rate'].mean().round(1),
+        "highest_failure_rate": df['fail_rate'].max().round(1),
+        "total_students": df['total'].sum()
+    }
+    
+    return summary[['Subject Code', 'Description', 'Total Students', 'Total Failures', 'Failure Rate', 'Dropout Rate', 'Difficulty Level']], metrics
 
-    if subjects_df is None or subjects_df.empty:
-        st.warning("Subjects data not available.")
-        return pd.DataFrame()
 
-    subjects_df = subjects_df[subjects_df["Teacher"] == current_faculty]
-    if subjects_df.empty:
-        return pd.DataFrame()
+def create_subject_section_data(df):
+    """Return per-subject breakdown across sections with Difficulty Level"""
+    if df.empty:
+        return {}
+    
+    subject_groups = {}
+    
+    for code, group in df.groupby('SubjectCode'):
+        group_display = group.copy()
+        
+        # Build section label as "SubjectCode-Section"
+        group_display['Section'] = group_display['SubjectCode'] + group_display['section'].astype(str)
+        
+        # Add Difficulty Level
+        def get_difficulty(rate):
+            if rate >= 50:
+                return "High"
+            elif rate >= 20:
+                return "Medium"
+            else:
+                return "Low"
+        
+        group_display['Difficulty Level'] = group_display['fail_rate'].apply(get_difficulty)
+        
+        # Rename columns for display
+        group_display = group_display.rename(columns={
+            'total': 'Total Students',
+            'failures': 'Total Failures',
+            'fail_rate': 'Failure Rate',
+            'dropout_rate': 'Dropout Rate',
+        })
+        
+        # Format values
+        group_display['Failure Rate'] = group_display['Failure Rate'].astype(str) + '%'
+        group_display['Dropout Rate'] = group_display['Dropout Rate'].astype(str) + '%'
+        group_display['Total Students'] = group_display['Total Students'].astype(str)
+        group_display['Total Failures'] = group_display['Total Failures'].astype(str)
+        
+        # Subject name
+        subject_name = group_display['Description'].iloc[0] if 'Description' in group_display else ""
+        
+        # Store cleaned dataframe
+        subject_groups[f"{code} - {subject_name}"] = group_display[
+            ['Section', 'Total Students', 'Total Failures', 'Failure Rate', 'Dropout Rate', 'Difficulty Level']
+        ]
+    
+    return subject_groups
 
-    df["is_fail"] = df["Grade"] < passing_grade
+# ------------------- DISPLAY -------------------
+def display_failure_rates(df):
+    """Show summary + detailed breakdown"""
+    # Summary
+    
+    summary_table, metrics = create_summary_table(df)
 
-    grouped = df.groupby(["Teacher", "SubjectCode"]).agg(
-        total=("StudentID", "count"),
-        failures=("is_fail", "sum")
-    ).reset_index()
+    # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("Total Subjects", metrics["total_subjects"])
+    with col2: st.metric("Avg Failure Rate", f"{metrics['avg_failure_rate']:.1f}%")
+    with col3: st.metric("Highest Failure Rate", f"{metrics['highest_failure_rate']:.1f}%")
+    with col4: st.metric("Total Students", metrics["total_students"])
 
-    grouped["fail_rate"] = (grouped["failures"] / grouped["total"] * 100).round(2)
-    grouped = grouped[grouped["total"] > 0]
-
-    merged = grouped.merge(
-        subjects_df[["_id", "Description", "Units", "Teacher"]],
-        left_on="SubjectCode", right_on="_id", how="inner"
+    # Display summary table
+    st.subheader("📊 Summary Failure Rates (All Sections Combined)")
+    st.dataframe(summary_table, use_container_width=True, hide_index=True)
+    
+    # Chart
+    st.subheader("📈 Failure Rate Visualization")
+    summary_table["Label"] = summary_table["Subject Code"] + " - " + summary_table["Description"]
+    summary_table["Failure Rate %"] = summary_table["Failure Rate"].str.replace("%", "").astype(float)
+    fig = px.bar(
+        summary_table,
+        x="Label",
+        y="Failure Rate %",
+        text="Failure Rate",
+        title="Failure Rate per Subject",
+        color="Failure Rate %", color_continuous_scale="oranges"
     )
-
-    merged = merged.drop(columns=["_id"])
     
-    merged = merged.sort_values(
-        ["fail_rate", "failures", "total"],
-        ascending=[False, False, False]
-    )
+    fig.update_yaxes(range=[0, 100])
+    fig.update_layout(xaxis_tickangle=-25, showlegend=False)
+    fig.update_traces(textposition='outside')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Detailed breakdown
+    st.subheader("📂 Detailed Breakdown by Subject & Section")
+    section_data = create_subject_section_data(df)
+    for subject_label, subject_df in section_data.items():
+        with st.expander(subject_label):
+            st.dataframe(subject_df, use_container_width=True, hide_index=True)
+            # Chart
+            st.subheader("📈 Failure Rate Visualization")
+            subject_df["Label"] = subject_df["Section"]
+            subject_df["Failure Rate %"] = subject_df["Failure Rate"].str.replace("%", "").astype(float)
+            fig2 = px.bar(
+                subject_df,
+                x="Label",
+                y="Failure Rate %",
+                text="Failure Rate",
+                title="Failure Rate per Subject",
+                color="Failure Rate %", color_continuous_scale="oranges"
+            )
+            fig2.update_yaxes(range=[0, 100])
+            fig2.update_layout(xaxis_tickangle=-25, showlegend=False)
+            fig2.update_traces(textposition='outside')
+            st.plotly_chart(fig2, use_container_width=True)
 
-    return merged
 
+# --- Data Loader ---
 def load_failure_data(new_curriculum, passing_grade, selected_semester_id):
-    """Load and cache failure rate data"""
     with st.spinner("Loading failure rate data..."):
         grades_df = get_dataframe_grades(new_curriculum)
         df = compute_subject_failure_rates(
-            grades_df, 
-            new_curriculum, 
+            df=grades_df, 
+            new_curriculum=new_curriculum, 
+            current_faculty=current_faculty,
             passing_grade=passing_grade, 
             selected_semester_id=selected_semester_id
         )
-        
-        # Store in session state
-        st.session_state.tab3_failure_data = df
-        st.session_state.tab3_data_loaded = True
-        st.session_state.tab3_last_params = {
-            'new_curriculum': new_curriculum,
-            'passing_grade': passing_grade,
-            'selected_semester_id': selected_semester_id
-        }
-        
         return df
 
 def params_changed(new_curriculum, passing_grade, selected_semester_id):
-    """Check if parameters have changed since last load"""
     current_params = {
         'new_curriculum': new_curriculum,
         'passing_grade': passing_grade,
@@ -110,32 +215,22 @@ def params_changed(new_curriculum, passing_grade, selected_semester_id):
     }
     return st.session_state.tab3_last_params != current_params
 
+# --- Tab Display ---
 def show_faculty_tab3_info(new_curriculum):
-    # Initialize session state
     initialize_session_state()
-    
     current_faculty = st.session_state.get('user_data', {}).get('Name', '')
     semesters = get_semesters_list(new_curriculum)
     
-    # Controls row
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-    
+    col1, col2 = st.columns([2, 1])
     with col1:
         semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters] + [" - All Semesters - "]
-        selected_semester_display = st.selectbox(
-            "📅 Select Semester", 
-            semester_options,
-            key="tab3_main_semester"
-        )
-    
+        selected_semester_display = st.selectbox("📅 Select Semester", semester_options, key="tab3_main_semester")
     with col2:
         passing_grade = st.number_input("Passing Grade", 20, 100, 75, key="tab3_passing_grade")
     
-    load_button = st.button("🔄 Load Data", key="tab3_load_button", type="secondary")
     if not st.session_state.tab3_data_loaded:
         st.info("👆 Select your filters and click 'Load Data' to display Data.")
     
-    # Determine selected semester ID
     selected_semester_id = None
     if selected_semester_display != " - All Semesters - ":
         for sem in semesters:
@@ -143,179 +238,67 @@ def show_faculty_tab3_info(new_curriculum):
                 selected_semester_id = sem['_id']
                 break
     
-    # Check if we need to reload data
-    should_load = (
-        load_button or 
-        not st.session_state.tab3_data_loaded or 
-        params_changed(new_curriculum, passing_grade, selected_semester_id)
-    )
-    
-    # Load data if needed
-    if should_load:
-        df = load_failure_data(new_curriculum, passing_grade, selected_semester_id)
-    else:
-        df = st.session_state.tab3_failure_data
-    
-    st.divider()
-    
-    # Header with data status
-    data_status = "Current Data" if st.session_state.tab3_data_loaded else "No Data Loaded"
-    st.markdown(
-        f"<h3 style='text-align: left;'>👨‍🏫 {current_faculty} Subject Difficulty Heatmap ({selected_semester_display}) - {data_status}</h3>",
-        unsafe_allow_html=True
-    )
-    
-    # Display results
-    if df.empty:
-        if st.session_state.tab3_data_loaded:
-            st.warning("No data available for the selected parameters.")
-        else:
-            st.info("Click 'Load Data' to view failure rate analysis.")
-        return
-    
-    # Prepare table data
-    table_df = df.copy()
-    table_df["Failure Rate"] = table_df["fail_rate"].astype(str) + "%"
-    table_df["Units"] = table_df["Units"].astype(str)
-    table_df["Total Students"] = table_df["total"].astype(str)
-    table_df["Total Failures"] = table_df["failures"].astype(str)
+    load_button = st.button("🔄 Load Data", key="tab3_load_button", type="secondary") 
+    if load_button:
+        with st.spinner("Loading data..."):
+            try:
+                st.session_state.tab3_new_curriculum = new_curriculum
+                st.session_state.tab3_last_params = {
+                    'new_curriculum': new_curriculum,
+                    'passing_grade': passing_grade,
+                    'selected_semester_id': selected_semester_id
+                }
+                
+                df = load_failure_data(new_curriculum, passing_grade, selected_semester_id)
+                st.session_state.tab3_failure_data = df
+                st.session_state.tab3_data_loaded = True
+                
+                st.divider()
+                st.markdown(f"<h3>👨‍🏫 {current_faculty} Subject Difficulty Heatmap ({selected_semester_display})</h3>", unsafe_allow_html=True)
+                
+                if df.empty:
+                    st.warning("No data available for the selected parameters.")
+                    return
+                
+                # Prepare table
+                table_df = df.copy()
+                table_df["Failure Rate"] = table_df["fail_rate"].astype(str) + "%"
+                table_df["Units"] = table_df["Units"].astype(str)
+                table_df["Total Students"] = table_df["total"].astype(str)
+                table_df["Total Failures"] = table_df["failures"].astype(str)
 
-    table_df = table_df.rename(columns={
-        "SubjectCode": "Subject Code",
-        "Description": "Description"
-    })
+                table_df = table_df.rename(columns={"SubjectCode": "Subject Code"})
+                # display_cols = ["Subject Code", "Description", "Units", "Total Students", "Total Failures", "Failure Rate"]
+                
+                
+                
+                df = load_failure_data(new_curriculum, passing_grade, selected_semester_id)
+                display_failure_rates(df)
+                
+                
+                
+                # --- PDF Export ---
+                st.subheader("📄 Export Report")
+                add_pdf_download_button(df, new_curriculum, selected_semester_display, passing_grade)
+            
+            except Exception as e:
+                st.error(f"❌ Error loading data: {str(e)}")
 
-    display_cols = [
-        "Subject Code",
-        "Description",
-        "Units",
-        "Total Students",
-        "Total Failures",
-        "Failure Rate"
-    ]
-    
-    # Data summary metrics
-    col_metrics1, col_metrics2, col_metrics3, col_metrics4 = st.columns(4)
-    
-    with col_metrics1:
-        st.metric("Total Subjects", len(df))
-    
-    with col_metrics2:
-        avg_failure_rate = df["fail_rate"].mean()
-        st.metric("Avg Failure Rate", f"{avg_failure_rate:.1f}%")
-    
-    with col_metrics3:
-        highest_failure = df["fail_rate"].max() if not df.empty else 0
-        st.metric("Highest Failure Rate", f"{highest_failure:.1f}%")
-    
-    with col_metrics4:
-        total_students_analyzed = df["total"].sum()
-        st.metric("Total Students", total_students_analyzed)
-    
-    # Display table
-    st.subheader("📊 Detailed Failure Rate Table")
-    st.dataframe(
-        style_failure_table(table_df[display_cols]), 
-        use_container_width=True, 
-        hide_index=True
-    )
-    
-    # Display chart
-    st.subheader("📈 Failure Rate Visualization")
-    
-    # Prepare chart data
-    table_df["Label"] = table_df["Subject Code"] + " - " + table_df["Description"]
-    table_df["Failure Rate %"] = table_df["Failure Rate"].str.replace("%", "").astype(float)
-    
-    # Bar chart
-    fig = px.bar(
-        table_df,
-        x="Label",
-        y="Failure Rate %",
-        text="Failure Rate",
-        title="Failure Rate per Subject",
-        color="Failure Rate %",
-        color_continuous_scale="oranges"
-    )
-
-    fig.update_layout(
-        xaxis_title="Subject",
-        yaxis_title="Failure Rate (%)",
-        xaxis_tickangle=-25,
-        showlegend=False
-    )
-    
-    fig.update_traces(textposition='outside')
-
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Additional insights
-    if not df.empty:
-        st.subheader("🔍 Key Insights")
-        
-        # Find subjects with highest and lowest failure rates
-        highest_failure_subject = df.loc[df["fail_rate"].idxmax()]
-        lowest_failure_subject = df.loc[df["fail_rate"].idxmin()]
-        
-        insight_col1, insight_col2 = st.columns(2)
-        
-        with insight_col1:
-            st.error(f"**Highest Failure Rate:** {highest_failure_subject['SubjectCode']} - {highest_failure_subject['Description']} ({highest_failure_subject['fail_rate']}%)")
-        
-        with insight_col2:
-            st.success(f"**Lowest Failure Rate:** {lowest_failure_subject['SubjectCode']} - {lowest_failure_subject['Description']} ({lowest_failure_subject['fail_rate']}%)")
-
-    # --- PDF Export Button ---
-    st.subheader("📄 Export Report")
-    add_pdf_download_button(df, table_df, fig, display_cols, new_curriculum, selected_semester_display, passing_grade)
-
-
-def add_pdf_download_button(df, table_df, fig, display_cols, new_curriculum, selected_semester_display = None, passing_grade = None):
-    """Add a download button for PDF export"""
-    
+# --- PDF Export ---
+def add_pdf_download_button(df, new_curriculum, selected_semester_display=None, passing_grade=None):
     if df is None or df.empty:
         st.warning("No data available to export to PDF.")
         return
-    
     try:
-        summary_metrics = {
-            "total_subjects": len(df),
-            "avg_failure_rate": df["fail_rate"].mean(),
-            "highest_failure_rate": df["fail_rate"].max(),
-            "total_students": df["total"].sum()
-        }
+        summary_df, summary_metrics = create_summary_table(df)
 
-        # Generate PDF (returns bytes now)
-        pdf_bytes = generate_failure_pdf(
-            table_df[display_cols],
-            summary_metrics,
-            fig,
-            selected_semester_display,
-            passing_grade
-        )
-        
-        # Generate filename (always ends with .pdf)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        curriculum_type = "New" if new_curriculum else "Old"
-        filename = f"Subject_Difficulty_{curriculum_type}_{timestamp}.pdf"
-        
-        # Download button
-        st.download_button(
-            label="📄 Download PDF Report",
-            data=pdf_bytes,
-            file_name=filename,
-            mime="application/pdf",
-            type="secondary",
-            help="Download Subjects with Highest Failure Rates",
-            key="download_pdf_tab3" 
-        )
-        
+        pdf_bytes = generate_failure_pdf(summary_df,df, summary_metrics,  selected_semester_display, passing_grade)
+        filename = f"Subject_Difficulty_{'New' if new_curriculum else 'Old'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        st.download_button("📄 Download PDF Report", data=pdf_bytes, file_name=filename, mime="application/pdf")
     except Exception as e:
         st.error(f"Error generating PDF: {str(e)}")
-        st.info("Please ensure all required data is properly loaded before generating the PDF.")
 
 def style_failure_table(df):
-    """Style Total Failures and Failure Rate in dark red."""
     return df.style.apply(
         lambda row: [
             "color: orange; font-weight: bold" if col in ["Total Failures", "Failure Rate"] else ""
@@ -324,230 +307,174 @@ def style_failure_table(df):
         axis=1
     )
 
-# --- PDF Generator ---
-def generate_failure_pdf(df, summary_metrics, chart_fig, selected_semester_display = None, passing_grade = None):
-    """
-    Generate PDF report containing:
-    1. Summary metrics
-    2. Failure rate table
-    3. Chart visualization
-    Returns raw PDF bytes for download button.
-    """
+def generate_failure_pdf(summary_df,detail_df, summary_metrics, selected_semester_display=None, passing_grade=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
     elements = []
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=18,
-        spaceAfter=30,
-        alignment=TA_CENTER,
-        textColor=colors.darkblue
-    )
-    
-    styles.add(ParagraphStyle(name="CenterHeading", alignment=1, fontSize=14, spaceAfter=10))
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=18, spaceAfter=30, alignment=TA_CENTER, textColor=colors.darkblue)
 
-    # --- Title Block ---
+    # Title and Header Info
     elements.append(Paragraph("Faculty Failure Rate Report", title_style))
     elements.append(Paragraph(f"Faculty: {current_faculty}", styles['Normal']))
-
     if selected_semester_display:
         elements.append(Paragraph(f"Semester: {selected_semester_display}", styles['Normal']))
     if passing_grade:
         elements.append(Paragraph(f"Passing Grade: {passing_grade}", styles['Normal']))
-
     elements.append(Spacer(1, 12))
 
-    # --- Summary Metrics Table ---
+    # --- Summary Metrics ---
     summary_data = [
         ["Total Subjects", "Avg Failure Rate", "Highest Failure Rate", "Total Students"],
-        [
-            summary_metrics["total_subjects"],
-            f"{summary_metrics['avg_failure_rate']:.1f}%",
-            f"{summary_metrics['highest_failure_rate']:.1f}%",
-            summary_metrics["total_students"]
-        ]
+        [summary_metrics["total_subjects"], f"{summary_metrics['avg_failure_rate']:.1f}%", f"{summary_metrics['highest_failure_rate']:.1f}%", summary_metrics["total_students"]]
     ]
-
-    summary_table = Table(summary_data, hAlign="LEFT")
-    summary_table.setStyle(TableStyle([
+    summary_metrics_table = Table(summary_data, hAlign="LEFT")
+    summary_metrics_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f2a654")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 10)
     ]))
-    elements.append(summary_table)
+    elements.append(summary_metrics_table)
     elements.append(Spacer(1, 20))
 
-    # --- Detailed Failure Rate Table ---
-    table_data = [df.columns.tolist()] + df.values.tolist()
-
-    wrapped_data = []
-    for row in table_data:
-        new_row = []
-        for idx, cell in enumerate(row):
-            if idx == 1 and isinstance(cell, str):  # Description column
-                new_row.append(Paragraph(cell, ParagraphStyle("wrap", fontSize=8)))
-            else:
-                new_row.append(str(cell))
-        new_row = [Paragraph(str(c), ParagraphStyle("normal", fontSize=8)) if not isinstance(c, Paragraph) else c for c in new_row]
-        wrapped_data.append(new_row)
-
-    detail_table = Table(wrapped_data, repeatRows=1)
-    detail_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4b8bbe")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-    ]))
-    elements.append(Paragraph("Detailed Failure Rate Table", styles["Heading2"]))
-    elements.append(detail_table)
-    elements.append(Spacer(1, 20))
-    
-    # --- Add Bar Chart Visualization ---
-    elements.append(Paragraph("Failure Rate Visualization", styles["Heading2"]))
-
-    # Prepare data for the chart
-    chart_data = []
-    labels = []
-    
-    for _, row in df.iterrows():
-        failure_percent = float(row["Failure Rate"].replace('%', ''))
-        chart_data.append(failure_percent)
-        # Truncate long subject codes for better display
-        subject_label = row["Subject Code"]
-        if len(subject_label) > 8:
-            subject_label = subject_label[:8] + "..."
-        labels.append(subject_label)
-    
-    # Create the drawing canvas
-    drawing = Drawing(600, 400)
-    
-    # Create vertical bar chart
-    chart = VerticalBarChart()
-    chart.x = 50
-    chart.y = 50
-    chart.width = 500
-    chart.height = 300
-    
-    # Set the data
-    chart.data = [chart_data]  # Wrap in list for single series
-    chart.categoryAxis.categoryNames = labels
-    
-    # Styling the chart
-    chart.valueAxis.valueMin = 0
-    chart.valueAxis.valueMax = max(chart_data) + 10 if chart_data else 100
-    chart.valueAxis.valueStep = 10
-
-    # Color bars
-    chart.bars.fillColor = rl_colors.HexColor("#ff6b35")
-    chart.bars.strokeColor = rl_colors.black
-    chart.bars.strokeWidth = 0.5
-
-    # Axis labels style
-    chart.categoryAxis.labels.boxAnchor = 'ne'
-    chart.categoryAxis.labels.angle = 45
-    chart.categoryAxis.labels.fontSize = 8
-    chart.categoryAxis.labels.dx = -5
-    chart.categoryAxis.labels.dy = -5
-    chart.valueAxis.labels.fontSize = 8
-
-    # --- Add chart title ---
-    title = String(300, 370, "Subject Failure Rates", fontSize=14, textAnchor='middle')
-    title.fontName = 'Helvetica-Bold'
-
-    # --- Add Y-axis label manually ---
-    y_axis_label = String(20, 200, "Failure Rate (%)", fontSize=10, angle=90)
-    y_axis_label.fontName = "Helvetica-Bold"
-
-    drawing.add(chart)
-    drawing.add(title)
-    drawing.add(y_axis_label)
-    
-    # Add the drawing to PDF elements
-    elements.append(drawing)
-    elements.append(Spacer(1, 20))
-    
-    # Add a data table showing the exact values below the chart
-    chart_values_data = [["Subject Code", "Description", "Failure Rate"]]
-    for _, row in df.iterrows():
-        chart_values_data.append([
-            row["Subject Code"],
-            row["Description"][:40] + "..." if len(row["Description"]) > 40 else row["Description"],
-            row["Failure Rate"]
-        ])
-    
-    chart_values_table = Table(chart_values_data, repeatRows=1)
-    chart_values_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ff6b35")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.lightgrey])
-    ]))
-    elements.append(Paragraph("Chart Data Values", styles["Heading3"]))
-    elements.append(chart_values_table)
-    elements.append(Spacer(1, 20))
-
-    # --- Key Insights Section ---
-    if not df.empty:
-        elements.append(Spacer(1, 20))
-        elements.append(Paragraph("Key Insights", styles["Heading2"]))
-        
-        # Find subjects with highest and lowest failure rates
-        # Convert failure rate string to float for comparison
-        df_copy = df.copy()
-        df_copy['failure_rate_float'] = df_copy['Failure Rate'].str.replace('%', '').astype(float)
-        
-        highest_idx = df_copy['failure_rate_float'].idxmax()
-        lowest_idx = df_copy['failure_rate_float'].idxmin()
-        
-        highest_subject = df_copy.loc[highest_idx]
-        lowest_subject = df_copy.loc[lowest_idx]
-        
-        insights_data = [
-            ["Insight Type", "Subject Code", "Description", "Failure Rate"],
-            [
-                "Highest Failure Rate",
-                highest_subject['Subject Code'],
-                highest_subject['Description'],
-                highest_subject['Failure Rate']
-            ],
-            [
-                "Lowest Failure Rate", 
-                lowest_subject['Subject Code'],
-                lowest_subject['Description'],
-                lowest_subject['Failure Rate']
-            ]
-        ]
-        
-        insights_table = Table(insights_data, repeatRows=1)
-        insights_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#34495e")),
+    # --- Summary Table (All Sections Combined) ---
+    elements.append(Paragraph("📊 Summary Failure Rates (All Sections Combined)", styles["Heading2"]))
+    if not summary_df.empty:
+        table_data = [summary_df.columns.tolist()] + summary_df.values.tolist()
+        wrapped = [[Paragraph(str(c), styles["Normal"]) for c in row] for row in table_data]
+        summary_detail_table = Table(wrapped, repeatRows=1)
+        summary_detail_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4b8bbe")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#e74c3c")),  # Red for highest
-            ("BACKGROUND", (0, 2), (-1, 2), colors.HexColor("#27ae60")),  # Green for lowest
-            ("TEXTCOLOR", (0, 1), (-1, 2), colors.white),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (-1, 2), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("FONTSIZE", (0, 0), (-1, -1), 9)
         ]))
-        elements.append(insights_table)
+        elements.append(summary_detail_table)
+        elements.append(Spacer(1, 20))
 
-    # Build PDF into buffer
+    # --- Chart Visualization ---
+    elements.append(Paragraph("📈 Failure Rate Visualization", styles["Heading2"]))
+    if not summary_df.empty:
+        # Create chart data from summary table
+        chart_data = [float(row["Failure Rate"].replace('%', '')) for _, row in summary_df.iterrows()]
+        labels = [f"{row['Subject Code']}" for _, row in summary_df.iterrows()]
+        
+        # Truncate labels if too long for better display
+        labels = [label[:8] + "..." if len(label) > 8 else label for label in labels]
+        
+        drawing = Drawing(700, 400)
+        chart = VerticalBarChart()
+        chart.x, chart.y, chart.width, chart.height = 50, 50, 600, 300
+        chart.data = [chart_data]
+        chart.categoryAxis.categoryNames = labels
+        chart.valueAxis.valueMin = 0
+        chart.valueAxis.valueMax = max(chart_data) + 10 if chart_data else 100
+        chart.valueAxis.valueStep = 10
+        chart.bars.fillColor = rl_colors.HexColor("#ff6b35")
+        chart.categoryAxis.labels.angle = -25  # Rotate labels like in the Plotly chart
+        chart.categoryAxis.labels.fontSize = 8
+        drawing.add(chart)
+        drawing.add(String(350, 370, "Subject Failure Rates", fontSize=14, textAnchor='middle'))
+        elements.append(drawing)
+        elements.append(Spacer(1, 20))
+        section_data = create_subject_section_data(detail_df)
+        
+        if not summary_df.empty:
+            elements.append(Paragraph("🔍 Key Insights", styles["Heading2"]))
+            df_calc = summary_df.copy()
+            df_calc['failure_rate_float'] = df_calc['Failure Rate'].str.replace('%', '').astype(float)
+            
+            high = df_calc.loc[df_calc['failure_rate_float'].idxmax()]
+            low = df_calc.loc[df_calc['failure_rate_float'].idxmin()]
+            
+            # Count subjects by difficulty level
+            difficulty_counts = summary_df['Difficulty Level'].value_counts()
+            
+            insights_text = [
+                f"• Highest failure rate: {high['Subject Code']} - {high['Description']} ({high['Failure Rate']})",
+                f"• Lowest failure rate: {low['Subject Code']} - {low['Description']} ({low['Failure Rate']})",
+                f"• High difficulty subjects: {difficulty_counts.get('High', 0)}",
+                f"• Medium difficulty subjects: {difficulty_counts.get('Medium', 0)}",
+                f"• Low difficulty subjects: {difficulty_counts.get('Low', 0)}"
+            ]
+            
+            for insight in insights_text:
+                elements.append(Paragraph(insight, styles['Normal']))
+                elements.append(Spacer(1, 6))
+            
+        
+        for subject_label, subject_df in section_data.items():
+            
+            if subject_df is not None and not subject_df.empty:
+                # Add subject header
+                elements.append(Paragraph(f"Subject: {subject_label}", styles["Heading3"]))
+
+                # Build the table
+                table_data = [subject_df.columns.tolist()] + subject_df.values.tolist()
+                wrapped = [[Paragraph(str(c), styles["Normal"]) for c in row] for row in table_data]
+                summary_detail_table = Table(wrapped, repeatRows=1)
+                summary_detail_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4b8bbe")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9)
+                ]))
+                elements.append(summary_detail_table)
+                elements.append(Spacer(1, 20))
+
+                chart_data = [float(row["Failure Rate"].replace('%', '')) for _, row in subject_df.iterrows()]
+                labels = [f"{row['Section']}" for _, row in subject_df.iterrows()]
+                
+                # Truncate labels if too long for better display
+                labels = [label[:8] + "..." if len(label) > 8 else label for label in labels]
+                
+                drawing = Drawing(700, 400)
+                chart = VerticalBarChart()
+                chart.x, chart.y, chart.width, chart.height = 50, 50, 600, 300
+                chart.data = [chart_data]
+                chart.categoryAxis.categoryNames = labels
+                chart.valueAxis.valueMin = 0
+                chart.valueAxis.valueMax = max(chart_data) + 10 if chart_data else 100
+                chart.valueAxis.valueStep = 10
+                chart.bars.fillColor = rl_colors.HexColor("#ff6b35")
+                chart.categoryAxis.labels.angle = -25  # Rotate labels like in the Plotly chart
+                chart.categoryAxis.labels.fontSize = 8
+                drawing.add(chart)
+                drawing.add(String(350, 370, "Subject Failure Rates", fontSize=14, textAnchor='middle'))
+                elements.append(drawing)
+                elements.append(Spacer(1, 20))
+                
+                # --- Key Insights ---
+            if not subject_df.empty:
+                elements.append(Paragraph("🔍 Key Insights", styles["Heading2"]))
+                df_calc = subject_df.copy()
+                df_calc['failure_rate_float'] = df_calc['Failure Rate'].str.replace('%', '').astype(float)
+                
+                high = df_calc.loc[df_calc['failure_rate_float'].idxmax()]
+                low = df_calc.loc[df_calc['failure_rate_float'].idxmin()]
+                
+                # Count subjects by difficulty level
+                difficulty_counts = subject_df['Difficulty Level'].value_counts()
+                
+                insights_text = [
+                    f"• Highest failure rate: {high['Section']} ({high['Failure Rate']})",
+                    f"• Lowest failure rate: {low['Section']} ({low['Failure Rate']})",
+                    f"• High difficulty subjects: {difficulty_counts.get('High', 0)}",
+                    f"• Medium difficulty subjects: {difficulty_counts.get('Medium', 0)}",
+                    f"• Low difficulty subjects: {difficulty_counts.get('Low', 0)}"
+                ]
+                
+                for insight in insights_text:
+                    elements.append(Paragraph(insight, styles['Normal']))
+                    elements.append(Spacer(1, 6))
+
+    
+
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()

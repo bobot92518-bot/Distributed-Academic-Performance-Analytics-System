@@ -20,18 +20,18 @@ def load_pkl_data(cache_path):
     if os.path.exists(cache_path):
         return pd.read_pickle(cache_path)
     else:
-        print(f"⚠️ Cache file {cache_path} not found.")
+        st.markdown(f"⚠️ Cache file {cache_path} not found.")
         return pd.DataFrame()
 
 def export_to_excel(df, filename):
     """Export DataFrame to Excel"""
     df.to_excel(filename, index=False)
-    print(f"Exported to {filename}")
+    st.markdown(f"Exported to {filename}")
 
 def export_to_pdf(df, filename):
     """Export DataFrame to PDF (placeholder)"""
     df.to_pdf(filename, index=False)
-    print(f"PDF export not implemented. Data: {df.head()}")
+    st.markdown(f"PDF export not implemented. Data: {df.head()}")
 
 def pkl_data_to_df(cache_path):
     pkl_data = load_pkl_data(cache_path)

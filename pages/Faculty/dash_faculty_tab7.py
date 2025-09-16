@@ -11,12 +11,12 @@ from reportlab.lib.pagesizes import letter, landscape, A4
 from reportlab.lib.units import inch
 from datetime import datetime
 from global_utils import load_pkl_data, pkl_data_to_df, result_records_to_dataframe
-from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
+from pages.Faculty.faculty_data_helper import get_distinct_section_per_subject, get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
 
-def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter):
+def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter,selected_section_value):
     buffer = io.BytesIO()
 
     # Landscape PDF
@@ -46,6 +46,7 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     elements.append(Paragraph(f"Teacher: {current_faculty}", styles['Normal']))
     elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
     elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
+    elements.append(Paragraph(f"Subject Class: {selected_section_value}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     # Convert df for display
@@ -230,10 +231,10 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
     }
     
     # Group by semester and subject
-    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel), group in filtered_df.groupby(
-        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel']
+    for (semester, school_year, subject_code, subject_desc, SubjectYearLevel, section), group in filtered_df.groupby(
+        ['semester', 'schoolYear', 'subjectCode', 'subjectDescription', 'SubjectYearLevel', 'section']
     ):
-        with st.expander(f"{semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_year_map.get(SubjectYearLevel, "")}", expanded=True):
+        with st.expander(f"{semester} - {school_year} &nbsp;&nbsp; | &nbsp;&nbsp; {subject_code} {section} &nbsp;&nbsp; - &nbsp;&nbsp; {subject_desc} &nbsp;&nbsp; {subject_year_map.get(SubjectYearLevel, "")}", expanded=True):
             
             table_data = group[['StudentID', 'studentName', 'Course', 'YearLevel', 'grade']].copy()
             table_data.columns = ['Student ID', 'Student Name', 'Course', 'Year Level', 'Grade']
@@ -395,12 +396,12 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
 
             st.altair_chart(pie, use_container_width=True)
 
-def add_grade_analytics_pdf_generator(df, is_new_curriculum, semester_filter, subject_filter):
+def add_grade_analytics_pdf_generator(df, is_new_curriculum, semester_filter, subject_filter, selected_section_value):
     if df is None or df.empty:
         st.warning("No data available to export to PDF.")
         return
     try:
-        pdf_bytes = generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter)
+        pdf_bytes = generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter, selected_section_value)
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -428,7 +429,7 @@ def show_faculty_tab7_info(new_curriculum):
     semesters = get_semesters_list(new_curriculum)
     subjects = get_subjects_by_teacher(current_faculty, new_curriculum)
     
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     
     
     with col1:
@@ -459,12 +460,48 @@ def show_faculty_tab7_info(new_curriculum):
             if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
                 selected_subject_code = subj['_id']
                 break
+    
+    sections = []
+    if selected_subject_code:
+        sections = get_distinct_section_per_subject(selected_subject_code, current_faculty)
+    
+    if (new_curriculum):
+        with col3:
+            if sections:
+                # Build section options with value/label mapping
+                section_options = []
+                for row in sections:
+                    subj_code = row["SubjectCodes"]
+                    for sec in row["section"]:
+                        section_options.append({"value": sec, "label": f"{subj_code}{sec}"})
+
+                # Use the labels for the selectbox display
+                selected_section_label = st.selectbox(
+                    "📝 Select Section",
+                    [opt["label"] for opt in section_options],
+                    key="tab7_subject_section",
+                    help="Choose a section to track student progress"
+                )
+
+                # Get the actual section value back
+                selected_section_value = next(
+                    (opt["value"] for opt in section_options if opt["label"] == selected_section_label),
+                    None
+                )
+
+            else:
+                selected_section_value = None
             
     if st.button("📊 Load Class", type="secondary", key="tab7_load_button"):
         with st.spinner("Loading grades data..."):
             
             if new_curriculum:
-                results = get_new_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
+                results = get_new_student_grades_by_subject_and_semester(
+                    current_faculty=current_faculty, 
+                    semester_id = selected_semester_id, 
+                    subject_code = selected_subject_code
+                )
+                results = [res for res in results if res["section"] == selected_section_value]
             else:
                 results = get_student_grades_by_subject_and_semester(current_faculty=current_faculty, semester_id = selected_semester_id, subject_code = selected_subject_code)
             
@@ -479,7 +516,7 @@ def show_faculty_tab7_info(new_curriculum):
                 st.success(f"Found {len(results)} grade records for {current_faculty}")
                 
                 display_grades_table(new_curriculum, df, selected_semester_display, selected_subject_display)
-                add_grade_analytics_pdf_generator(df, new_curriculum, selected_semester_display, selected_subject_display)
+                add_grade_analytics_pdf_generator(df, new_curriculum, selected_semester_display, selected_subject_display, selected_section_value)
             else:
                 st.warning(f"No grades found for {current_faculty} in the selected semester.")
                 

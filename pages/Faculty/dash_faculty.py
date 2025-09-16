@@ -50,7 +50,7 @@ def show_faculty_dashboard():
     data_query_label = f"{""}"
     
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📋 Class List",
+        "📋 Class Grade Distribution",
         "📈 Student Tracker",
         "📚 Subject Difficulty",
         "👥 At-Risk List",
