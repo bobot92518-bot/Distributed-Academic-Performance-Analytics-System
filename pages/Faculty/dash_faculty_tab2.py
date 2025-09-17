@@ -744,7 +744,9 @@ def show_faculty_tab2_info(new_curriculum):
                 if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
                     selected_subject_code = subj['_id']
                     break
-        
+                
+        selected_section_label = None
+        selected_section_value = None
         sections = []
         if selected_subject_code:
             sections = get_distinct_section_per_subject(selected_subject_code, current_faculty)
