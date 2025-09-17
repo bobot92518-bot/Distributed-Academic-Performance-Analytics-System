@@ -2,14 +2,17 @@ import streamlit as st
 import altair as alt
 import pandas as pd 
 import matplotlib.pyplot as plt
+import plotly.express as px
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.textlabels import Label
+from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.lib import colors as rl_colors
 from io import BytesIO
 from datetime import datetime
 from global_utils import result_records_to_dataframe
@@ -122,96 +125,99 @@ def display_grades_table(is_new_curriculum, df, semester_filter=None, subject_fi
 
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
         
-        st.markdown("**Grades Summary**")
+        # st.markdown("**Grades Summary**")
+
+        # Compute frequencies
         freq_data = table_data["Grade_num"].value_counts().reset_index()
         freq_data.columns = ["Grade", "Frequency"]
 
+        # Add Grade Status
         freq_data["Grade Status"] = freq_data["Grade"].apply(
             lambda g: "Not Set" if pd.isna(g) or g == 0
             else ("Pass" if g >= 75 else "Fail")
         )
 
-        chart2 = (
-            alt.Chart(freq_data)
-            .mark_bar()
-            .encode(
-                x=alt.X("Grade:O", title="Grades", sort="ascending"),
-                y=alt.Y("Frequency:Q", title="Number of Students"),
-                color=alt.Color(
-                    "Grade Status",
-                    title="Grade Status",
-                    scale=alt.Scale(
-                        domain=["Pass", "Fail"],
-                        range=["green", "red"]
-                    )
-                ),
-                tooltip=["Grade", "Frequency"]
-            )
+        # Plotly bar chart
+        fig = px.bar(
+            freq_data.sort_values("Grade"),  # sort grades ascending
+            x="Grade",
+            y="Frequency",
+            color="Grade Status",
+            color_discrete_map={"Pass": "#51cf66", "Fail": "#ff6b6b", "Not Set": "gray"},
+            title="Grades Summary"
         )
 
-        st.altair_chart(chart2, use_container_width=True)
+        # Add labels on top
+        fig.update_traces(texttemplate="%{y}", textposition="outside")
+
+        # Format axes
+        fig.update_layout(
+            xaxis_title="Grades",
+            yaxis_title="Number of Students",
+            uniformtext_minsize=10,
+            uniformtext_mode="hide"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
-        st.markdown("**Pass vs. Fail**")
+        # st.markdown("**Pass vs. Fail**")
+
+        # Assign Grade Status
         table_data["Grade Status"] = table_data["Grade_num"].apply(
             lambda g: "Not Set" if pd.isna(g) or g == 0
             else ("Pass" if g >= 75 else "Fail")
         )
+
+        # Count Pass/Fail/Not Set
         pass_fail_data = table_data["Grade Status"].value_counts().reset_index()
         pass_fail_data.columns = ["Grade Status", "Number of Students"]
 
-        bars = (
-            alt.Chart(pass_fail_data)
-            .mark_bar()
-            .encode(
-                x=alt.X("Grade Status:N", title="Grade Category", sort=["Pass", "Fail", "Not Set"]),
-                y=alt.Y("Number of Students:Q", title="Number of Students"),
-                color=alt.Color(
-                    "Grade Status",
-                    scale=alt.Scale(
-                        domain=["Pass", "Fail", "Not Set"],
-                        range=["green", "red", "gray"]
-                    )
-                ),
-                tooltip=["Grade Status", "Number of Students"]
-            )
+        # Plotly bar chart
+        fig = px.bar(
+            pass_fail_data,
+            x="Grade Status",
+            y="Number of Students",
+            color="Grade Status",
+            color_discrete_map={"Pass": "#51cf66", "Fail": "#ff6b6b", "Not Set": "gray"},
+            category_orders={"Grade Status": ["Pass", "Fail", "Not Set"]},
+            title="Pass vs. Fail"
         )
 
-        labels = (
-            alt.Chart(pass_fail_data)
-            .mark_text(dy=-10, fontSize=14, color="black")
-            .encode(
-                x="Grade Status:N",
-                y="Number of Students:Q",
-                text="Number of Students:Q"
-            )
+        # Add labels on top of bars
+        fig.update_traces(texttemplate="%{y}", textposition="outside")
+
+        # Format axes
+        fig.update_layout(
+            xaxis_title="Grade Category",
+            yaxis_title="Number of Students",
+            uniformtext_minsize=12,
+            uniformtext_mode="hide"
         )
 
-        chart3 = bars + labels
-
-        st.altair_chart(chart3, use_container_width=True)
+        # Display in Streamlit
+        st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
-        st.markdown("**Pass vs. Fail (Pie Chart)**")
+        # st.markdown("**Pass vs. Fail (Pie Chart)**")
         
-        pie = (
-            alt.Chart(pass_fail_data)
-            .mark_arc(innerRadius=0) 
-            .encode(
-                theta=alt.Theta("Number of Students:Q", title=""),
-                color=alt.Color(
-                    "Grade Status:N",
-                    scale=alt.Scale(
-                        domain=["Pass", "Fail", "Not Set"],
-                        range=["green", "red", "gray"]
-                    ),
-                    legend=alt.Legend(title="Grade Status")
-                ),
-                tooltip=["Grade Status", "Number of Students"]
+        if not pass_fail_data.empty:
+            fig = px.pie(
+                pass_fail_data,
+                names="Grade Status",
+                values="Number of Students",
+                color="Grade Status",
+                color_discrete_map={
+                    "Pass": "#51cf66",
+                    "Fail": "#ff6b6b",
+                    "Not Set": "gray"
+                },
+                title="Pass vs. Fail (Pie Chart)"
             )
-        )
 
-        st.altair_chart(pie, use_container_width=True)
+            fig.update_traces(textinfo="percent+label", pull=[0.05, 0.05, 0])  # show % + label
+
+            st.plotly_chart(fig, use_container_width=True)
     
     if not df.empty:
         pdf_bytes = generate_grades_pdf(
@@ -373,7 +379,7 @@ def show_faculty_tab6_info(new_curriculum):
                         df = df[valid_grades_by_status]
 
                     elif selected_grade_status == "Failed - Below 75":
-                        valid_grades_by_status = (df['Grade_num'].notna()) & (df['Grade_num'] < 75)
+                        valid_grades_by_status = (df['Grade_num'].notna()) & (df['Grade_num'] < 75) & (df['Grade_num'] != 0)
                         df = df[valid_grades_by_status]
 
                     elif selected_grade_status == "Passed - Above 75":
@@ -434,19 +440,19 @@ def generate_grades_pdf(
     # ---- Title & Metadata ----
     title = f"Student Grades Query Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
     elements.append(Paragraph(title, title_style))
-    elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Faculty:</b> {faculty_name}", styles['Normal']))
     if semester_filter:
-        elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Semester:</b> {semester_filter}", styles['Normal']))
     if subject_filter:
-        elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Subject:</b> {subject_filter}", styles['Normal']))
     if selected_section_label is not None and selected_section_label != " - All - ":
-        elements.append(Paragraph(f"Subject Class: {selected_section_label}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Subject Class:</b> {selected_section_label}", styles['Normal']))
     if student_name_filter:
-        elements.append(Paragraph(f"Student Name Filter: {student_name_filter}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Student Name Filter:</b> {student_name_filter}", styles['Normal']))
     if status_filter:
-        elements.append(Paragraph(f"Status Filter: {status_filter}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Status Filter:</b> {status_filter}", styles['Normal']))
     query_result = f"{len(df)} Students" if len(df) > 1 else f"{len(df)} Student"
-    elements.append(Paragraph(f"Query Result: {len(df)} Students", styles['Normal']))
+    elements.append(Paragraph(f"<b>Query Result:</b> {len(df)} Students", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     # ---- Prepare data ----
@@ -508,16 +514,41 @@ def generate_grades_pdf(
     freq_data = freq_data.sort_values("Grade")
 
     if not freq_data.empty:
-        fig, ax = plt.subplots(figsize=(5, 3))
-        ax.bar(freq_data["Grade"], freq_data["Frequency"], color="skyblue")
-        ax.set_title("Grades Summary")
-        ax.set_xlabel("Grade")
-        ax.set_ylabel("Number of Students")
-        chart_buf = BytesIO()
-        plt.savefig(chart_buf, format="png", bbox_inches="tight")
-        plt.close(fig)
-        chart_buf.seek(0)
-        elements.append(Image(chart_buf, width=300, height=200))
+        chart_data = freq_data["Frequency"].tolist()
+        labels = freq_data["Grade"].astype(str).tolist()
+
+        # Bigger canvas
+        drawing = Drawing(500, 300)
+
+        # Bar chart setup
+        chart = VerticalBarChart()
+        chart.x, chart.y, chart.width, chart.height = 50, 50, 400, 200
+        chart.data = [chart_data]
+        chart.categoryAxis.categoryNames = labels
+        chart.valueAxis.valueMin = 0
+        chart.valueAxis.valueMax = max(chart_data) + 2
+        chart.valueAxis.valueStep = max(1, int(max(chart_data) / 5))
+        chart.bars[0].fillColor = colors.HexColor("#ff6b6b")  # green bars
+
+        # Add chart to drawing ✅
+        drawing.add(chart)
+
+        # Labels on bars (frequencies)
+        for i, value in enumerate(chart_data):
+            x = chart.x + chart.width / len(chart_data) * (i + 0.5)
+            y = chart.y + (value / chart.valueAxis.valueMax) * chart.height + 5
+            drawing.add(String(x, y, str(value), fontSize=8, textAnchor="middle"))
+
+        # Title
+        drawing.add(String(250, 270, "Grades Summary", fontSize=12, textAnchor="middle"))
+
+        table = Table([[drawing]], colWidths=[500])  # match Drawing width
+        table.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),   # horizontal center
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),  # vertical center inside row
+        ]))
+
+        elements.append(table)
         elements.append(Spacer(1, 12))
 
     # Pass vs Fail (bar + pie)
@@ -527,7 +558,7 @@ def generate_grades_pdf(
     status_counts.columns = ["Status", "Count"]
 
     if not status_counts.empty:
-        colors_map = {"Pass": "green", "Fail": "red", "Not Set": "gray"}
+        colors_map = {"Pass": "#51cf66", "Fail": "#ff6b6b", "Not Set": "gray"}
 
         # Bar
         fig, ax = plt.subplots(figsize=(4, 3))

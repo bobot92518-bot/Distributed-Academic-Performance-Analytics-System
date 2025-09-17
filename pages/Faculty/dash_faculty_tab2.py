@@ -36,11 +36,11 @@ def create_advanced_grade_pdf(df, faculty_name, semester_filter=None, subject_fi
     # Title
     title = f"Student Progress Tracking ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
     elements.append(Paragraph(title, title_style))
-    elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Faculty:</b> {faculty_name}", styles['Normal']))
     if semester_filter:
-        elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Semester:</b> {semester_filter}", styles['Normal']))
     if subject_filter:
-        elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Subject:</b> {subject_filter}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     # Process data similar to display_student_progress

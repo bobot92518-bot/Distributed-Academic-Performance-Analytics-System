@@ -2,6 +2,8 @@ import streamlit as st
 import altair as alt
 import pandas as pd 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+import plotly.express as px
 import io
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
@@ -16,7 +18,7 @@ from pages.Faculty.faculty_data_helper import get_distinct_section_per_subject, 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
 
-def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter,selected_section_value):
+def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter,selected_section_label):
     buffer = io.BytesIO()
 
     # Landscape PDF
@@ -43,10 +45,10 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     # Title
     title = f"Grade Analytics Report ({'New Curriculum' if is_new_curriculum else 'Old Curriculum'})"
     elements.append(Paragraph(title, title_style))
-    elements.append(Paragraph(f"Teacher: {current_faculty}", styles['Normal']))
-    elements.append(Paragraph(f"Semester: {semester_filter}", styles['Normal']))
-    elements.append(Paragraph(f"Subject: {subject_filter}", styles['Normal']))
-    elements.append(Paragraph(f"Subject Class: {selected_section_value}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Teacher:</b> {current_faculty}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Semester:</b> {semester_filter}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Subject:</b> {subject_filter}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Subject Class:</b> {selected_section_label}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     # Convert df for display
@@ -54,14 +56,16 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     df['Pass/Fail'] = df['Grade_num'].apply(
         lambda g: "Not Set" if pd.isna(g) or g == 0 else ("Pass" if g >= 75 else "Fail")
     )
-
+    valid_grades = df["Grade_num"][
+                (df["Grade_num"].notna()) & (df["Grade_num"] > 0)
+            ]
     # Summary Table
     summary_data = [
         ["Total Students", len(df)],
-        ["Class Average", f"{df['Grade_num'].mean():.1f}" if not df['Grade_num'].dropna().empty else "Not Set"],
-        ["Class Median", f"{df['Grade_num'].median():.1f}" if not df['Grade_num'].dropna().empty else "Not Set"],
-        ["Highest Grade", f"{df['Grade_num'].max()}" if not df['Grade_num'].dropna().empty else "Not Set"],
-        ["Lowest Grade", f"{df['Grade_num'].min()}" if not df['Grade_num'].dropna().empty else "Not Set"]
+        ["Class Average", f"{valid_grades.mean():.1f}" if not valid_grades.empty else "Not Set"],
+        ["Class Median", f"{valid_grades.median():.1f}" if not valid_grades.empty else "Not Set"],
+        ["Highest Grade", f"{valid_grades.max()}" if not valid_grades.empty else "Not Set"],
+        ["Lowest Grade", f"{valid_grades.min()}" if not valid_grades.empty else "Not Set"]
     ]
 
     table = Table(summary_data, colWidths=[200, 200])
@@ -134,25 +138,32 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     elements.append(table)
     elements.append(Spacer(1, 12))
 
-
+    valid_grades = df["Grade_num"][
+                    (df["Grade_num"].notna()) & (df["Grade_num"] > 0)
+                ]
     # 📊 Grades Summary Chart (bar)
-    freq_data = df['Grade_num'].value_counts().reset_index()
+    freq_data = valid_grades.value_counts().reset_index()
     freq_data.columns = ["Grade", "Frequency"]
 
     if not freq_data.empty:
         fig, ax = plt.subplots(figsize=(6, 3))
-        ax.bar(freq_data["Grade"], freq_data["Frequency"], color="skyblue")
+        ax.bar(freq_data["Grade"], freq_data["Frequency"], color="#ff6b6b")
+
         ax.set_title("Grades Summary")
         ax.set_xlabel("Grades")
         ax.set_ylabel("Number of Students")
+        
+        plt.xticks(rotation=45)
+        plt.tight_layout()
 
         img_bytes = io.BytesIO()
-        plt.savefig(img_bytes, format="png")
+        plt.savefig(img_bytes, format="png", bbox_inches="tight")
         plt.close(fig)
         img_bytes.seek(0)
+
         elements.append(Image(img_bytes, width=5*inch, height=3*inch))
         elements.append(Spacer(1, 12))
-
+        
     # 📊 Pass vs Fail Bar Chart
     pass_fail_data = df["Pass/Fail"].value_counts().reset_index()
     pass_fail_data.columns = ["Grade Status", "Number of Students"]
@@ -160,11 +171,13 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
     if not pass_fail_data.empty:
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.bar(pass_fail_data["Grade Status"], pass_fail_data["Number of Students"],
-               color=["green" if x=="Pass" else "red" if x=="Fail" else "gray" for x in pass_fail_data["Grade Status"]])
+               color=["#51cf66" if x=="Pass" else "#ff6b6b" if x=="Fail" else "gray" for x in pass_fail_data["Grade Status"]])
         ax.set_title("Pass vs Fail")
         ax.set_xlabel("Grade Status")
         ax.set_ylabel("Number of Students")
-
+            
+        plt.tight_layout()
+        
         img_bytes = io.BytesIO()
         plt.savefig(img_bytes, format="png")
         plt.close(fig)
@@ -179,10 +192,11 @@ def generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject
             pass_fail_data["Number of Students"],
             labels=pass_fail_data["Grade Status"],
             autopct="%1.1f%%",
-            colors=["green" if x=="Pass" else "red" if x=="Fail" else "gray" for x in pass_fail_data["Grade Status"]]
+            colors=["#51cf66" if x=="Pass" else "#ff6b6b" if x=="Fail" else "gray" for x in pass_fail_data["Grade Status"]]
         )
-        ax.set_title("Pass vs Fail (Pie Chart)")
 
+        ax.set_title("Pass vs Fail (Pie Chart)")
+        
         img_bytes = io.BytesIO()
         plt.savefig(img_bytes, format="png")
         plt.close(fig)
@@ -322,7 +336,7 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
                         title="Grade Status",
                         scale=alt.Scale(
                             domain=["Pass", "Fail"],
-                            range=["green", "red"]
+                            range=["#51cf66", "#ff6b6b"]
                         )
                     ),
                     tooltip=["Grade", "Frequency"]
@@ -352,7 +366,7 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
                         "Grade Status",
                         scale=alt.Scale(
                             domain=["Pass", "Fail", "Not Set"],
-                            range=["green", "red", "gray"]
+                            range=["#51cf66", "#ff6b6b", "gray"]
                         )
                     ),
                     tooltip=["Grade Status", "Number of Students"]
@@ -377,31 +391,31 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
             st.divider()
             st.markdown("**Pass vs. Fail (Pie Chart)**")
             
-            pie = (
-                alt.Chart(pass_fail_data)
-                .mark_arc(innerRadius=0) 
-                .encode(
-                    theta=alt.Theta("Number of Students:Q", title=""),
-                    color=alt.Color(
-                        "Grade Status:N",
-                        scale=alt.Scale(
-                            domain=["Pass", "Fail", "Not Set"],
-                            range=["green", "red", "gray"]
-                        ),
-                        legend=alt.Legend(title="Grade Status")
-                    ),
-                    tooltip=["Grade Status", "Number of Students"]
-                )
+            fig = px.pie(
+                pass_fail_data,
+                values="Number of Students",
+                names="Grade Status",
+                color="Grade Status",
+                color_discrete_map={
+                    "Pass": "#51cf66",
+                    "Fail": "#ff6b6b",
+                    "Not Set": "gray"
+                },
+                hole=0.0  # 0 = pie, >0 = donut
             )
 
-            st.altair_chart(pie, use_container_width=True)
+            # Show percentage + label on slices
+            fig.update_traces(textinfo="percent+label")
 
-def add_grade_analytics_pdf_generator(df, is_new_curriculum, semester_filter, subject_filter, selected_section_value):
+            # Display in Streamlit
+            st.plotly_chart(fig, use_container_width=True)
+
+def add_grade_analytics_pdf_generator(df, is_new_curriculum, semester_filter, subject_filter, selected_section_label):
     if df is None or df.empty:
         st.warning("No data available to export to PDF.")
         return
     try:
-        pdf_bytes = generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter, selected_section_value)
+        pdf_bytes = generate_grade_analytics_pdf(is_new_curriculum, df, semester_filter, subject_filter, selected_section_label)
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -516,7 +530,7 @@ def show_faculty_tab7_info(new_curriculum):
                 st.success(f"Found {len(results)} grade records for {current_faculty}")
                 
                 display_grades_table(new_curriculum, df, selected_semester_display, selected_subject_display)
-                add_grade_analytics_pdf_generator(df, new_curriculum, selected_semester_display, selected_subject_display, selected_section_value)
+                add_grade_analytics_pdf_generator(df, new_curriculum, selected_semester_display, selected_subject_display, selected_section_label)
             else:
                 st.warning(f"No grades found for {current_faculty} in the selected semester.")
                 

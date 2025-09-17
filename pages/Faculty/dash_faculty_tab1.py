@@ -338,10 +338,11 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
             bc.valueAxis.valueMin = 0
             bc.barWidth = 15
             bc.valueAxis.valueStep = 1
+            bc.bars[0].fillColor = colors.HexColor("#ff6b6b")
 
             # Add chart to PDF
             elements.append(Spacer(1, 12))
-            elements.append(Paragraph("Grade Distribution Histogram (5-point bins)", info_style))
+            elements.append(Paragraph("Grade Distribution Histogram", info_style))
             drawing.add(bc)
             elements.append(drawing)
     

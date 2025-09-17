@@ -311,10 +311,10 @@ def generate_intervention_pdf(student_df, current_faculty, new_curriculum, selec
     # Title
     title = f"Student Risk Analysis Report ({'New Curriculum' if new_curriculum else 'Old Curriculum'})"
     elements.append(Paragraph(title, title_style))
-    elements.append(Paragraph(f"Faculty: {current_faculty}", styles["Normal"]))
-    elements.append(Paragraph(f"Semester: {selected_semester_display}", styles["Normal"]))
-    elements.append(Paragraph(f"Subject: {selected_subject_display}", styles["Normal"]))
-    elements.append(Paragraph(f"Passing Grade: {passing_grade}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Faculty:</b> {current_faculty}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Semester:</b> {selected_semester_display}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Subject:</b> {selected_subject_display}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Passing Grade:</b> {passing_grade}", styles["Normal"]))
     elements.append(Spacer(1, 12))
 
     if student_df.empty:

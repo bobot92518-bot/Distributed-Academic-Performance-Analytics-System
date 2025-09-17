@@ -4,6 +4,9 @@ import plotly.express as px
 import altair as alt
 import math
 import io
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.lib import colors as rl_colors
 from datetime import datetime
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import landscape, letter
@@ -246,9 +249,7 @@ def add_generate_pdf_button(new_curriculum):
         key="download_pdf_tab5" 
     )
 def generate_grades_submission_pdf(faculty_name, df, filters, selected_student=None):
-    from reportlab.graphics.shapes import Drawing
-    from reportlab.graphics.charts.barcharts import VerticalBarChart
-    from reportlab.lib import colors as rl_colors
+
     
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -278,14 +279,14 @@ def generate_grades_submission_pdf(faculty_name, df, filters, selected_student=N
     # --- Title + filter info ---
     title = "Student Grades Submission Status Report"
     elements.append(Paragraph(title, title_style))
-    elements.append(Paragraph(f"Faculty: {faculty_name}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Faculty:</b> {faculty_name}", styles['Normal']))
 
     if filters:
         sem = filters.get("semester", "All")
         subj = filters.get("subject", "All")
         search = filters.get("search_name", "")
-        elements.append(Paragraph(f"Semester: {sem}", styles['Normal']))
-        elements.append(Paragraph(f"Subject: {subj}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Semester:</b> {sem}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Subject:</b> {subj}", styles['Normal']))
         if search:
             elements.append(Paragraph(f"Search filter: {search}", styles['Normal']))
     elements.append(Spacer(1, 12))
@@ -352,7 +353,7 @@ def generate_grades_submission_pdf(faculty_name, df, filters, selected_student=N
         chart.valueAxis.valueMin = 0
         chart.valueAxis.valueMax = 100
         chart.valueAxis.valueStep = 10
-        chart.bars.fillColor = rl_colors.HexColor("#6baed6")
+        chart.bars[0].fillColor = rl_colors.HexColor("#6baed6")
         chart.categoryAxis.labels.angle = 0
         chart.categoryAxis.labels.fontSize = 10
         chart.valueAxis.labels.fontSize = 10
@@ -361,7 +362,11 @@ def generate_grades_submission_pdf(faculty_name, df, filters, selected_student=N
         drawing.add(chart)
         from reportlab.graphics.shapes import String
         drawing.add(String(350, 370, "Subject Submission Rates (%)", fontSize=14, textAnchor='middle', fillColor=colors.black))
-        
+        # 🔹 Add percentage labels above bars
+        for i, value in enumerate(chart_data):
+            x = chart.x + chart.width / len(chart_data) * (i + 0.5)   # center of each bar
+            y = chart.y + (value / chart.valueAxis.valueMax) * chart.height + 5
+            drawing.add(String(x, y, f"{value:.1f}%", fontSize=8, textAnchor="middle"))
         elements.append(drawing)
         elements.append(Spacer(1, 20))
 
@@ -422,13 +427,18 @@ def generate_grades_submission_pdf(faculty_name, df, filters, selected_student=N
                 section_chart.valueAxis.valueMin = 0
                 section_chart.valueAxis.valueMax = 100
                 section_chart.valueAxis.valueStep = 20
-                section_chart.bars.fillColor = rl_colors.HexColor("#1f77b4")
+                # section_chart.bars.fillColor = rl_colors.HexColor("#1f77b4")
+                section_chart.bars[0].fillColor = colors.HexColor("#1f77b4")
                 section_chart.categoryAxis.labels.angle = 0
                 section_chart.categoryAxis.labels.fontSize = 9
                 
                 section_drawing.add(section_chart)
                 section_drawing.add(String(300, 270, f"Submission Rate per Section - {subject_code}", fontSize=12, textAnchor='middle'))
-                
+                for i, value in enumerate(section_chart_data):
+                    x = section_chart.x + section_chart.width / len(section_chart_data) * (i + 0.5)   # center of each bar
+                    y = section_chart.y + (value / section_chart.valueAxis.valueMax) * section_chart.height + 5
+                    section_drawing.add(String(x, y, f"{value:.1f}%", fontSize=8, textAnchor="middle"))
+
                 elements.append(section_drawing)
                 elements.append(Spacer(1, 20))
 

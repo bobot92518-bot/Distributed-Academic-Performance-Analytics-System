@@ -317,11 +317,11 @@ def generate_failure_pdf(summary_df,detail_df, summary_metrics, selected_semeste
 
     # Title and Header Info
     elements.append(Paragraph("Faculty Failure Rate Report", title_style))
-    elements.append(Paragraph(f"Faculty: {current_faculty}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Faculty:</b> {current_faculty}", styles['Normal']))
     if selected_semester_display:
-        elements.append(Paragraph(f"Semester: {selected_semester_display}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Semester:</b> {selected_semester_display}", styles['Normal']))
     if passing_grade:
-        elements.append(Paragraph(f"Passing Grade: {passing_grade}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Passing Grade:</b> {passing_grade}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
     # --- Summary Metrics ---
@@ -374,11 +374,16 @@ def generate_failure_pdf(summary_df,detail_df, summary_metrics, selected_semeste
         chart.valueAxis.valueMin = 0
         chart.valueAxis.valueMax = max(chart_data) + 10 if chart_data else 100
         chart.valueAxis.valueStep = 10
-        chart.bars.fillColor = rl_colors.HexColor("#ff6b35")
+        chart.bars.fillColor = rl_colors.HexColor("#ff6b6b")
         chart.categoryAxis.labels.angle = -25  # Rotate labels like in the Plotly chart
         chart.categoryAxis.labels.fontSize = 8
         drawing.add(chart)
         drawing.add(String(350, 370, "Subject Failure Rates", fontSize=14, textAnchor='middle'))
+        # 🔹 Add percentage labels above bars
+        for i, value in enumerate(chart_data):
+            x = chart.x + chart.width / len(chart_data) * (i + 0.5)   # center of each bar
+            y = chart.y + (value / chart.valueAxis.valueMax) * chart.height + 5
+            drawing.add(String(x, y, f"{value:.1f}%", fontSize=8, textAnchor="middle"))
         elements.append(drawing)
         elements.append(Spacer(1, 20))
         section_data = create_subject_section_data(detail_df)
@@ -441,11 +446,16 @@ def generate_failure_pdf(summary_df,detail_df, summary_metrics, selected_semeste
                 chart.valueAxis.valueMin = 0
                 chart.valueAxis.valueMax = max(chart_data) + 10 if chart_data else 100
                 chart.valueAxis.valueStep = 10
-                chart.bars.fillColor = rl_colors.HexColor("#ff6b35")
+                chart.bars[0].fillColor = rl_colors.HexColor("#ff6b6b")
                 chart.categoryAxis.labels.angle = -25  # Rotate labels like in the Plotly chart
                 chart.categoryAxis.labels.fontSize = 8
                 drawing.add(chart)
                 drawing.add(String(350, 370, "Subject Failure Rates", fontSize=14, textAnchor='middle'))
+                # 🔹 Add percentage labels above bars
+                for i, value in enumerate(chart_data):
+                    x = chart.x + chart.width / len(chart_data) * (i + 0.5)   # center of each bar
+                    y = chart.y + (value / chart.valueAxis.valueMax) * chart.height + 5
+                    drawing.add(String(x, y, f"{value:.1f}%", fontSize=8, textAnchor="middle"))
                 elements.append(drawing)
                 elements.append(Spacer(1, 20))
                 
