@@ -54,25 +54,23 @@ def get_semesters_list(new_curriculum):
 
 
 @st.cache_data(ttl=300)
-def get_subjects_by_teacher(teacher_name, is_new_curriculum = False):
+def get_subjects_by_teacher(teacher_name, is_new_curriculum=False):
     """Get subjects taught by a specific teacher"""
     try:
-        if(is_new_curriculum):
-            subjects_df = pkl_data_to_df(new_subjects_cache)
-        else:
-            subjects_df = pkl_data_to_df(subjects_cache)
+        subjects_df = pkl_data_to_df(new_subjects_cache if is_new_curriculum else subjects_cache)
 
         # Handle empty DataFrame
         if subjects_df is None or subjects_df.empty:
             return []
 
         if "Teacher" in subjects_df.columns:
-            teacher_subjects = subjects_df[subjects_df["Teacher"] == teacher_name]
+            teacher_subjects = subjects_df[subjects_df["Teacher"] == teacher_name].copy()
 
-            if "_id" in teacher_subjects.columns:
-                teacher_subjects = teacher_subjects.sort_values("_id")
+            teacher_subjects["SubjectCode"] = teacher_subjects["_id"].str.replace(" ", "")
+            teacher_subjects = teacher_subjects.sort_values("SubjectCode")
 
-            columns_to_return = ["_id", "Description", "Units", "Teacher"]
+            # Select columns safely
+            columns_to_return = ["_id", "SubjectCode", "Description", "Units", "Teacher"]
             available_columns = [col for col in columns_to_return if col in teacher_subjects.columns]
 
             return teacher_subjects[available_columns].to_dict("records")
