@@ -249,6 +249,8 @@ def create_retention_pdf(summary, year_level_summary, course_filter, total_stude
     elements.append(summary_table)
     elements.append(Spacer(1, 20))
 
+    # Key Insights Section (moved to bottom)
+
     # Overall Summary Table
     elements.append(Paragraph("Overall Student Status Summary", header_style))
     elements.append(Spacer(1, 6))
@@ -310,6 +312,39 @@ def create_retention_pdf(summary, year_level_summary, course_filter, total_stude
             img_buffer = BytesIO(img_bytes)
             elements.append(Image(img_buffer, width=400, height=300))
             elements.append(Spacer(1, 20))
+
+        # Key Insights Section (moved to bottom)
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("🔍 Key Insights", header_style))
+        elements.append(Spacer(1, 6))
+
+        total = total_students
+        retained = retained_count
+        at_risk = at_risk_count
+        dropped = dropped_count
+        rate = retention_rate
+
+        insights_text = f"""
+<b>Student Retention Overview:</b><br/>
+• Total students analyzed: {total:,} across all year levels.<br/>
+• Students retained: {retained:,} ({rate:.1f}% retention rate).<br/>
+• Students at risk: {at_risk:,}, requiring immediate academic support.<br/>
+• Students who dropped out: {dropped:,}, indicating potential systemic issues.<br/>
+<br/>
+<b>Retention Analysis:</b><br/>
+• {'Strong retention performance' if rate > 80 else 'Moderate retention levels' if rate > 60 else 'Concerning retention rates requiring attention'}.<br/>
+• {'High at-risk population suggests need for enhanced support programs.' if at_risk > total * 0.2 else 'Manageable at-risk numbers with targeted interventions.'}<br/>
+• {'Significant dropout rates indicate potential barriers to student success.' if dropped > total * 0.1 else 'Acceptable dropout levels with room for improvement.'}<br/>
+<br/>
+<b>Recommendations:</b><br/>
+• Implement early warning systems for at-risk students.<br/>
+• Develop targeted retention strategies for different year levels.<br/>
+• Enhance academic support services and mentoring programs.<br/>
+• Monitor retention trends and adjust interventions accordingly.
+"""
+
+        elements.append(Paragraph(insights_text, info_style))
+        elements.append(Spacer(1, 20))
 
     doc.build(elements)
     buffer.seek(0)

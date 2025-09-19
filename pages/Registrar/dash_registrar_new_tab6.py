@@ -248,6 +248,7 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
     deans_list_count = len(df[df["Status"] == "Dean's List"])
     good_standing_count = len(df[df["Status"] == "Good Standing"])
     probation_count = len(df[df["Status"] == "Probation"])
+    overall_avg = df["GPA"].mean()
 
     # Overall Statistics Table
     overall_stats_data = [
@@ -275,6 +276,10 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
     elements.append(Spacer(1, 6))
     elements.append(overall_table)
     elements.append(Spacer(1, 20))
+
+    # Key Insights Section
+    # Move Key Insights to the bottom of the PDF
+    # Remove from here and append later after all other content
 
     # Group by School Year for detailed analysis
     if not df.empty and 'SchoolYear' in df.columns:
@@ -395,6 +400,31 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
 
                 elements.append(probation_table)
                 elements.append(Spacer(1, 15))
+
+    # Key Insights Section - Moved to bottom of PDF
+    elements.append(PageBreak())
+    elements.append(Paragraph("🔍 Key Insights", header_style))
+    elements.append(Spacer(1, 6))
+
+    deans_list_pct = (deans_list_count / total_students * 100) if total_students > 0 else 0
+    good_standing_pct = (good_standing_count / total_students * 100) if total_students > 0 else 0
+    probation_pct = (probation_count / total_students * 100) if total_students > 0 else 0
+
+    insights_text = f"""
+<b>Academic Performance Overview:</b><br/>
+• The institution has {deans_list_count} students on the Dean's List ({deans_list_pct:.1f}%), indicating strong academic excellence.<br/>
+• {good_standing_count} students are in good standing ({good_standing_pct:.1f}%), demonstrating solid performance.<br/>
+• {probation_count} students are on academic probation ({probation_pct:.1f}%), requiring immediate intervention and support.<br/>
+• Overall GPA average: {overall_avg:.1f} - {'Excellent standards' if overall_avg >= 90 else 'Good performance' if overall_avg >= 75 else 'Areas for improvement needed'}.<br/>
+<br/>
+<b>Recommendations:</b><br/>
+• {'Celebrate and recognize top performers to maintain motivation.' if deans_list_pct > 20 else 'Implement programs to increase Dean\'s List representation.'}<br/>
+• {'Continue current academic support systems.' if probation_pct < 15 else 'Strengthen academic advising and tutoring programs for at-risk students.'}<br/>
+• Monitor semester-over-semester trends to identify early warning signs.
+"""
+
+    elements.append(Paragraph(insights_text, info_style))
+    elements.append(Spacer(1, 20))
 
     # Build PDF
     doc.build(elements)

@@ -202,6 +202,10 @@ def create_enrollment_trends_pdf(
     elements.append(overall_table)
     elements.append(Spacer(1, 20))
 
+    # Key Insights Section
+    # Move Key Insights to the bottom of the PDF
+    # Remove from here and append later after all other content
+
     # ===================== YOY ANALYSIS =====================
     if yoy_analysis:
         elements.append(Paragraph("Year-over-Year Enrollment Trends", header_style))
@@ -361,6 +365,36 @@ def create_enrollment_trends_pdf(
 
         elements.append(Image(img_bytes, width=4.5*inch, height=4.5*inch))
         elements.append(Spacer(1, 20))
+
+    # Key Insights Section (moved to bottom)
+    elements.append(Paragraph("🔍 Key Insights", header_style))
+    elements.append(Spacer(1, 6))
+
+    total = total_enrollment
+    avg = avg_per_semester
+    peak = max_enrollment
+    semesters = unique_semesters
+
+    insights_text = f"""
+<b>Enrollment Trends Overview:</b><br/>
+• Total enrollment across all semesters: {total:,} students.<br/>
+• Average enrollment per semester: {avg:.0f} students, indicating {'stable' if avg > 50 else 'moderate'} enrollment levels.<br/>
+• Peak enrollment reached {peak:,} students, showing {'strong demand' if peak > 100 else 'steady growth'} in certain periods.<br/>
+• Data tracked across {semesters} semesters, providing {'comprehensive' if semesters > 10 else 'initial'} trend analysis.<br/>
+<br/>
+<b>Trend Analysis:</b><br/>
+• {'Increasing trends suggest growing popularity and effective marketing.' if avg > 50 else 'Stable enrollment indicates consistent demand for programs.'}<br/>
+• {'High peak periods may require additional resources during those semesters.' if peak > 100 else 'Enrollment patterns are manageable with current capacity.'}<br/>
+• Year-over-year analysis helps identify seasonal patterns and long-term growth.<br/>
+<br/>
+<b>Recommendations:</b><br/>
+• Monitor enrollment patterns to optimize resource allocation.<br/>
+• Use trend data for strategic planning and capacity management.<br/>
+• Focus on high-demand courses to maximize enrollment potential.
+"""
+
+    elements.append(Paragraph(insights_text, info_style))
+    elements.append(Spacer(1, 20))
 
     # --- Build PDF ---
     doc.build(elements)

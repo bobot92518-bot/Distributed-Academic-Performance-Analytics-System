@@ -247,6 +247,11 @@ def create_pass_fail_distribution_pdf(
     elements.append(overall_table)
     elements.append(Spacer(1, 20))
 
+    # Key Insights Section
+    # Move Key Insights to the bottom of the PDF
+    # Remove from here and append later after all other content
+
+
     # --- Subject-wise Summary
     elements.append(Paragraph("Subject-wise Pass/Fail Distribution", header_style))
     elements.append(Spacer(1, 6))
@@ -305,6 +310,36 @@ def create_pass_fail_distribution_pdf(
     plt.close(fig)
     img_bytes.seek(0)
     elements.append(Image(img_bytes, width=4.5*inch, height=4.5*inch))
+
+    # Key Insights Section moved to bottom
+    elements.append(Spacer(1, 20))
+    elements.append(Paragraph("🔍 Key Insights", header_style))
+    elements.append(Spacer(1, 6))
+
+    total = total_records
+    passed = pass_count
+    failed = fail_count
+    rate = pass_rate
+
+    insights_text = f"""
+<b>Subject Pass/Fail Overview:</b><br/>
+• Total records analyzed: {total:,}.<br/>
+• Passed: {passed:,} ({rate:.1f}% pass rate).<br/>
+• Failed: {failed:,}, indicating areas for improvement.<br/>
+<br/>
+<b>Performance Analysis:</b><br/>
+• {'Strong pass rates' if rate > 80 else 'Moderate pass rates' if rate > 60 else 'Concerning pass rates requiring attention'}.<br/>
+• {'High failure rates suggest need for targeted academic support.' if failed > total * 0.2 else 'Manageable failure rates with focused interventions.'}<br/>
+<br/>
+<b>Recommendations:</b><br/>
+• Enhance tutoring and remedial programs for challenging subjects.<br/>
+• Monitor subject performance trends regularly.<br/>
+• Provide additional resources and support for at-risk students.<br/>
+• Collaborate with faculty to improve curriculum and assessment methods.
+"""
+
+    elements.append(Paragraph(insights_text, info_style))
+    elements.append(Spacer(1, 20))
 
     doc.build(elements)
     buffer.seek(0)

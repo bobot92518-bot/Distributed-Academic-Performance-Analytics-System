@@ -556,10 +556,11 @@ def add_pdf_download_button(df, faculty_name, semester_filter=None, subject_filt
 
 current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
-def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_filter = None):
+def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_filter = None, selected_teacher=None):
     """Display grades in Streamlit format with PDF export option"""
-    
-    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
+
+    # Use selected teacher for faculty name in PDF, fallback to session user
+    faculty_name = selected_teacher if selected_teacher else st.session_state.get('user_data', {}).get('Name', '')
     
     if df.empty:
         st.warning("No grades found for the selected criteria.")
@@ -750,7 +751,7 @@ def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_
             st.altair_chart(hist_chart, use_container_width=True)
             
     st.subheader("📄 Export Report")
-    add_pdf_download_button(df, current_faculty, semester_filter, subject_filter, is_new_curriculum)
+    add_pdf_download_button(df, faculty_name, semester_filter, subject_filter, is_new_curriculum)
 
 def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
     new_curriculum = True  # Since using new data loaders
@@ -837,7 +838,8 @@ def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
         st.divider()
         display_grades_table(new_curriculum, st.session_state.tab1_grades_df,
                            st.session_state.tab1_loaded_filters.get('semester'),
-                           st.session_state.tab1_loaded_filters.get('subject'))
+                           st.session_state.tab1_loaded_filters.get('subject'),
+                           st.session_state.tab1_current_faculty)
 
     elif st.session_state.tab1_grades_df is not None and st.session_state.tab1_grades_df.empty:
         st.warning("No students found matching the current filters.")

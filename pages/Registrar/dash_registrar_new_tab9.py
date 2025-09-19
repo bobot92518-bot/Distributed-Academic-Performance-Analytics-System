@@ -98,6 +98,8 @@ def create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_inco
         elements.append(summary_table)
         elements.append(Spacer(1, 20))
 
+        # Key Insights Section (moved to bottom)
+
         # Grade Type Distribution
         elements.append(Paragraph("Grade Type Distribution", header_style))
         elements.append(Spacer(1, 6))
@@ -149,6 +151,39 @@ def create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_inco
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         elements.append(data_table)
+
+        # Key Insights Section (moved to bottom)
+        if not df.empty:
+            elements.append(Spacer(1, 20))
+            elements.append(Paragraph("🔍 Key Insights", header_style))
+            elements.append(Spacer(1, 6))
+
+            total = total_incomplete
+            students = unique_students
+            subjects = unique_subjects
+            faculty = unique_teachers
+
+            insights_text = f"""
+<b>Incomplete Grades Overview:</b><br/>
+• Total incomplete grades identified: {total:,} across the institution.<br/>
+• Number of affected students: {students:,}, requiring immediate academic support.<br/>
+• Subjects impacted: {subjects:,}, indicating potential curriculum or teaching challenges.<br/>
+• Faculty members involved: {faculty:,}, highlighting areas for faculty development.<br/>
+<br/>
+<b>Grade Type Analysis:</b><br/>
+• {'High incidence of incomplete grades suggests systemic issues requiring attention.' if total > 50 else 'Moderate incomplete grades indicate manageable academic support needs.'}<br/>
+• {'Multiple students affected indicates widespread academic challenges.' if students > 20 else 'Limited student impact allows for targeted interventions.'}<br/>
+• {'Faculty involvement across multiple subjects points to teaching methodology concerns.' if faculty > 5 else 'Concentrated faculty issues suggest specific training needs.'}<br/>
+<br/>
+<b>Recommendations:</b><br/>
+• Implement proactive academic monitoring and early intervention programs.<br/>
+• Provide additional faculty training on grade completion and student support.<br/>
+• Establish clear policies for handling incomplete grades and student communication.<br/>
+• Monitor trends to identify patterns and implement preventive measures.
+"""
+
+            elements.append(Paragraph(insights_text, info_style))
+            elements.append(Spacer(1, 20))
 
     doc.build(elements)
     buffer.seek(0)

@@ -329,6 +329,38 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
         elements.append(course_table)
         elements.append(Spacer(1, 12))
 
+    # Key Insights Section moved to bottom
+    elements.append(Spacer(1, 20))
+    elements.append(Paragraph("🔍 Key Insights", header_style))
+    elements.append(Spacer(1, 6))
+
+    total = total_performers
+    avg = avg_gpa
+    highest = max_gpa
+    programs = unique_courses
+
+    insights_text = f"""
+<b>Academic Excellence Overview:</b><br/>
+• Total top performers identified: {total:,} across all programs.<br/>
+• Average GPA among top performers: {avg:.2f}, indicating high academic standards.<br/>
+• Highest GPA achieved: {highest:.2f}, showcasing exceptional student performance.<br/>
+• Programs with top performers: {programs}, demonstrating broad academic excellence.<br/>
+<br/>
+<b>Performance Analysis:</b><br/>
+• {'Outstanding academic performance' if avg > 3.5 else 'Strong academic achievement' if avg > 3.0 else 'Good academic performance with room for excellence'}.<br/>
+• {'Exceptional individual achievement with GPA above 3.8' if highest > 3.8 else 'Strong individual performance with GPA above 3.5' if highest > 3.5 else 'Solid individual achievement'}.<br/>
+• {'Comprehensive academic excellence across multiple programs' if programs > 5 else 'Focused academic strength in key programs'}.<br/>
+<br/>
+<b>Recommendations:</b><br/>
+• Recognize and reward top performers to motivate continued excellence.<br/>
+• Study successful learning strategies of top performers for broader application.<br/>
+• Develop advanced academic programs for high-achieving students.<br/>
+• Share best practices across programs to elevate overall academic standards.
+"""
+
+    elements.append(Paragraph(insights_text, info_style))
+    elements.append(Spacer(1, 20))
+
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()
