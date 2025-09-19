@@ -10,7 +10,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
 from pages.Registrar.pdf_helper import generate_pdf
-from pages.Faculty.faculty_data_helper import get_distinct_section_per_subject, get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
+from pages.Faculty.faculty_data_helper import get_semesters_list, get_subjects_by_teacher, get_student_grades_by_subject_and_semester, get_new_student_grades_by_subject_and_semester
 from global_utils import result_records_to_dataframe
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -111,7 +111,100 @@ def load_curriculums_df():
             df[col] = None
     return df
 
-def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None, is_new_curriculum=False, section_filter=None):
+# def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
+#     grades_df = data['grades']
+#     subjects_df = data['subjects']
+
+#     st.subheader("👩‍🏫 Class List per Teacher")
+#     st.markdown("Select a teacher, then pick a subject to see the class roster.")
+
+#     cc1, cc2 = st.columns(2)
+#     with cc1:
+#         cl_teacher_opts = teachers_df["Teacher"].dropna().unique().tolist() if not teachers_df.empty else []
+#         cl_teacher = st.selectbox("Teacher", cl_teacher_opts, key="cls1_teacher")
+#     with cc2:
+#         st.write("")
+
+#     # Build expanded roster for teacher and subject selection
+#     def _expand_rows_cls1(gr):
+#         out = []
+#         grades_list = gr.get("Grades", [])
+#         subjects_list = gr.get("SubjectCodes", [])
+#         teachers_list = gr.get("Teachers", [])
+#         grades_list = grades_list if isinstance(grades_list, list) else [grades_list]
+#         subjects_list = subjects_list if isinstance(subjects_list, list) else [subjects_list]
+#         teachers_list = teachers_list if isinstance(teachers_list, list) else [teachers_list]
+#         n = max(len(grades_list), len(subjects_list), len(teachers_list)) if max(len(grades_list), len(subjects_list), len(teachers_list)) > 0 else 0
+#         for i in range(n):
+#             out.append({
+#                 "StudentID": gr.get("StudentID"),
+#                 "SemesterID": gr.get("SemesterID"),
+#                 "TeacherID": teachers_list[i] if i < len(teachers_list) else None,
+#                 "SubjectCode": subjects_list[i] if i < len(subjects_list) else None,
+#             })
+#         return out
+
+#     # Merge necessary student info
+#     cl_merged = grades_df.merge(students_df[["_id", "Name", "Course", "YearLevel"]], left_on="StudentID", right_on="_id", how="left")
+
+#     # No term filters in Tab 1 (use all records for teacher/subject)
+
+#     # Expand rows
+#     cls_expanded = []
+#     for _, rr in cl_merged.iterrows():
+#         cls_expanded.extend(_expand_rows_cls1(rr))
+
+#     if not cls_expanded:
+#         st.info("No records found. Adjust filters above.")
+#     else:
+#         cl_df = pd.DataFrame(cls_expanded)
+#         # Maps
+#         tmap = dict(zip(teachers_df["_id"], teachers_df["Teacher"])) if not teachers_df.empty else {}
+#         smap = dict(zip(subjects_df["_id"], subjects_df["Description"])) if not subjects_df.empty else {}
+#         semmap = dict(zip(semesters_df["_id"], semesters_df["Semester"])) if not semesters_df.empty else {}
+#         name_map = dict(zip(students_df["_id"], students_df["Name"])) if not students_df.empty else {}
+#         course_map = dict(zip(students_df["_id"], students_df["Course"])) if not students_df.empty else {}
+#         year_map = dict(zip(students_df["_id"], students_df["YearLevel"])) if not students_df.empty else {}
+
+#         cl_df["Teacher"] = cl_df["TeacherID"].map(tmap).fillna(cl_df["TeacherID"].astype(str))
+#         cl_df["Subject"] = cl_df["SubjectCode"].map(smap).fillna(cl_df["SubjectCode"].astype(str))
+#         cl_df["Semester"] = cl_df["SemesterID"].map(semmap).fillna(cl_df["SemesterID"].astype(str))
+#         cl_df["StudentName"] = cl_df["StudentID"].map(name_map).fillna(cl_df["StudentID"].astype(str))
+#         cl_df["Course"] = cl_df["StudentID"].map(course_map)
+#         cl_df["YearLevel"] = cl_df["StudentID"].map(year_map)
+
+#         # Filter by teacher
+#         if cl_teacher != "All":
+#             cl_df = cl_df[cl_df["Teacher"] == cl_teacher]
+
+#         if cl_df.empty:
+#             st.info("No classes for the selected teacher.")
+#         else:
+#             # Subject radio under selected teacher
+#             subj_opts = sorted(cl_df["Subject"].dropna().unique().tolist())
+#             sel_subj = st.radio("Subject", subj_opts, horizontal=False, key="cls1_subject_radio") if subj_opts else None
+
+#             if not sel_subj:
+#                 st.info("Choose a subject to view the class list.")
+#             else:
+#                 df_class = cl_df[cl_df["Subject"] == sel_subj]
+#                 st.success(f"Found {df_class['StudentID'].nunique()} students for {sel_subj}.")
+#                 show_cols = ["StudentID", "StudentName", "Course", "YearLevel", "Semester"]
+#                 st.subheader("Students by Year Level and Semester")
+#                 for year_level in sorted(df_class["YearLevel"].dropna().unique().tolist()):
+#                     st.markdown(f"**Year Level: {year_level}**")
+#                     df_year = df_class[df_class["YearLevel"] == year_level]
+#                     for sem_name in sorted(df_year["Semester"].dropna().unique().tolist()):
+#                         st.markdown(f"- Semester: {sem_name}")
+#                         df_sem = df_year[df_year["Semester"] == sem_name]
+#                         st.dataframe(
+#                             df_sem[show_cols]
+#                                 .sort_values(["StudentName"])
+#                                 .reset_index(drop=True),
+#                             use_container_width=True
+#                         )
+
+def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None, is_new_curriculum=False):
     """Generate PDF report for grades data"""
     
     buffer = BytesIO()
@@ -164,8 +257,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
     <b>Faculty:</b> {faculty_name}<br/>
     <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
     <b>Semester Filter:</b> {semester_filter if semester_filter and semester_filter != " - All Semesters - " else "All Semesters"}<br/>
-    <b>Subject Filter:</b> {subject_filter if subject_filter and subject_filter != " - All Subjects - " else "All Subjects"}<br/>
-    <b>Section Filter:</b> {section_filter if section_filter and section_filter != "All Sections" else "All Sections"}
+    <b>Subject Filter:</b> {subject_filter if subject_filter and subject_filter != " - All Subjects - " else "All Subjects"}
     """
     elements.append(Paragraph(report_info, info_style))
     elements.append(Spacer(1, 20))
@@ -183,9 +275,6 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
     
     if subject_filter and subject_filter != " - All Subjects - ":
         filtered_df = filtered_df[filtered_df['subjectCode'] + " - " + filtered_df['subjectDescription'] == subject_filter]
-    
-    if section_filter and section_filter != "All Sections":
-        filtered_df = filtered_df[filtered_df['section'] == section_filter]
     
     if filtered_df.empty:
         elements.append(Paragraph("No grades found for the selected filters.", styles['Normal']))
@@ -436,7 +525,7 @@ def create_grade_pdf(df, faculty_name, semester_filter=None, subject_filter=None
     buffer.seek(0)
     return buffer.getvalue()
 
-def add_pdf_download_button(df, faculty_name, semester_filter=None, subject_filter=None, is_new_curriculum=False, section_filter=None):
+def add_pdf_download_button(df, faculty_name, semester_filter=None, subject_filter=None, is_new_curriculum=False):
     """Add a download button for PDF export"""
     
     if df is None or df.empty:
@@ -444,7 +533,7 @@ def add_pdf_download_button(df, faculty_name, semester_filter=None, subject_filt
         return
     
     try:
-        pdf_data = create_grade_pdf(df, faculty_name, semester_filter, subject_filter, is_new_curriculum, section_filter)
+        pdf_data = create_grade_pdf(df, faculty_name, semester_filter, subject_filter, is_new_curriculum)
         
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -465,38 +554,27 @@ def add_pdf_download_button(df, faculty_name, semester_filter=None, subject_filt
         st.error(f"Error generating PDF: {str(e)}")
         st.info("Please ensure all required data is properly loaded before generating the PDF.")
 
-def display_grades_table(is_new_curriculum, df, faculty_name, semester_filter = None, subject_filter = None, section_filter = None):
-    """Display grades in Streamlit format with PDF export option"""
+current_faculty = st.session_state.get('user_data', {}).get('Name', '')
 
+def display_grades_table(is_new_curriculum, df, semester_filter = None, subject_filter = None):
+    """Display grades in Streamlit format with PDF export option"""
+    
+    current_faculty = st.session_state.get('user_data', {}).get('Name', '')
+    
     if df.empty:
         st.warning("No grades found for the selected criteria.")
         return
-
+    
     # Apply filters
     filtered_df = df.copy()
     if semester_filter and semester_filter != " - All Semesters - ":
         filtered_df = filtered_df[filtered_df['semester'] + " - " + filtered_df['schoolYear'].astype(str) == semester_filter]
-
+    
     if subject_filter and subject_filter != " - All Subjects - ":
         filtered_df = filtered_df[filtered_df['subjectCode'] + " - " + filtered_df['subjectDescription'] == subject_filter]
-
+    
     if filtered_df.empty:
         st.warning("No grades found for the selected filters.")
-        return
-
-    # Section filter
-    section_options = ["All Sections"] + sorted(filtered_df['section'].dropna().unique().tolist())
-    selected_section = st.selectbox(
-        "📖 Select Section",
-        section_options,
-        key="section_filter"
-    )
-
-    if selected_section != "All Sections":
-        filtered_df = filtered_df[filtered_df['section'] == selected_section]
-
-    if filtered_df.empty:
-        st.warning("No grades found for the selected section.")
         return
     
     year_map = {
@@ -672,7 +750,7 @@ def display_grades_table(is_new_curriculum, df, faculty_name, semester_filter = 
             st.altair_chart(hist_chart, use_container_width=True)
             
     st.subheader("📄 Export Report")
-    add_pdf_download_button(df, faculty_name, semester_filter, subject_filter, is_new_curriculum, selected_section)
+    add_pdf_download_button(df, current_faculty, semester_filter, subject_filter, is_new_curriculum)
 
 def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
     new_curriculum = True  # Since using new data loaders
@@ -696,109 +774,70 @@ def show_registrar_new_tab1_info(data, students_df, semesters_df, teachers_df):
         semesters = get_semesters_list(new_curriculum)
         subjects = get_subjects_by_teacher(selected_teacher, new_curriculum)
 
-        # Add third column for section selectbox
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2 = st.columns([1, 1])
 
-    with col1:
-        semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
-        selected_semester_display = st.selectbox(
-            "📅 Select Semester",
-            semester_options,
-            key="main_semester"
-        )
-    with col2:
-        subject_options = [f"{subj['_id']} - {subj['Description']}" for subj in subjects]
-        selected_subject_display = st.selectbox(
-            "📚 Select Subject",
-            subject_options,
-            key="main_subject"
-        )
+        with col1:
+            semester_options = [f"{sem['Semester']} - {sem['SchoolYear']}" for sem in semesters]
+            selected_semester_display = st.selectbox(
+                "📅 Select Semester",
+                semester_options,
+                key="main_semester"
+            )
+        with col2:
+            subject_options = [f"{subj['_id']} - {subj['Description']}" for subj in subjects]
+            selected_subject_display = st.selectbox(
+                "📚 Select Subject",
+                subject_options,
+                key="main_subject"
+            )
 
-    # Add section selectbox in third column
-    selected_section_label = None
-    selected_section_value = None
-    if new_curriculum:
-        with col3:
-            if selected_subject_display != " - All Subjects - ":
-                selected_subject_code = None
-                for subj in subjects:
-                    if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
-                        selected_subject_code = subj['_id']
-                        break
-                if selected_subject_code:
-                    sections = get_distinct_section_per_subject(selected_subject_code, selected_teacher)
-                    if sections:
-                        section_options = []
-                        for row in sections:
-                            subj_code = row["SubjectCodes"]
-                            for sec in row["section"]:
-                                section_options.append({"value": sec, "label": f"{subj_code}{sec}"})
-                        selected_section_label = st.selectbox(
-                            "📝 Select Section",
-                            [opt["label"] for opt in section_options],
-                            key="main_section_subject_section",
-                            help="Choose a section to track student progress"
-                        )
-                        selected_section_value = next(
-                            (opt["value"] for opt in section_options if opt["label"] == selected_section_label),
-                            None
-                        )
-                    else:
-                        selected_section_label = None
-                        selected_section_value = None
+        selected_semester_id = None
+        if selected_semester_display != " - All Semesters - ":
+            for sem in semesters:
+                if f"{sem['Semester']} - {sem['SchoolYear']}" == selected_semester_display:
+                    selected_semester_id = sem['_id']
+                    break
 
-    selected_semester_id = None
-    if selected_semester_display != " - All Semesters - ":
-        for sem in semesters:
-            if f"{sem['Semester']} - {sem['SchoolYear']}" == selected_semester_display:
-                selected_semester_id = sem['_id']
-                break
+        selected_subject_code = None
+        if selected_subject_display != " - All Subjects - ":
+            for subj in subjects:
+                if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
+                    selected_subject_code = subj['_id']
+                    break
 
-    selected_subject_code = None
-    if selected_subject_display != " - All Subjects - ":
-        for subj in subjects:
-            if f"{subj['_id']} - {subj['Description']}" == selected_subject_display:
-                selected_subject_code = subj['_id']
-                break
+        if st.button("📊 Load Class", type="secondary", key="tab1_load_button1"):
+            with st.spinner("Loading grades data..."):
 
-    if st.button("📊 Load Class", type="secondary", key="tab1_load_button1"):
-        with st.spinner("Loading grades data..."):
+                if new_curriculum:
+                    results = get_new_student_grades_by_subject_and_semester(current_faculty=selected_teacher, semester_id=selected_semester_id, subject_code=selected_subject_code)
+                else:
+                    results = get_student_grades_by_subject_and_semester(current_faculty=selected_teacher, semester_id=selected_semester_id, subject_code=selected_subject_code)
 
-            if new_curriculum:
-                results = get_new_student_grades_by_subject_and_semester(current_faculty=selected_teacher, semester_id=selected_semester_id, subject_code=selected_subject_code)
-                # Filter results by selected section if applicable
-                if selected_section_value:
-                    results = [res for res in results if res.get("section") == selected_section_value]
-            else:
-                results = get_student_grades_by_subject_and_semester(current_faculty=selected_teacher, semester_id=selected_semester_id, subject_code=selected_subject_code)
+                if results:
+                    df = result_records_to_dataframe(results)
 
-            if results:
-                df = result_records_to_dataframe(results)
+                    # Store in TAB 1 SPECIFIC session state keys
+                    st.session_state.tab1_grades_df = df
+                    st.session_state.tab1_current_faculty = selected_teacher
+                    st.session_state.tab1_loaded_filters = {
+                        'semester': selected_semester_display,
+                        'subject': selected_subject_display
+                    }
 
-                # Store in TAB 1 SPECIFIC session state keys
-                st.session_state.tab1_grades_df = df
-                st.session_state.tab1_current_faculty = selected_teacher
-                st.session_state.tab1_loaded_filters = {
-                    'semester': selected_semester_display,
-                    'subject': selected_subject_display,
-                    'section': selected_section_label
-                }
-
-            else:
-                st.warning(f"No grades found for {selected_teacher} in the selected semester.")
-                st.session_state.tab1_grades_df = None
+                else:
+                    st.warning(f"No grades found for {selected_teacher} in the selected semester.")
+                    st.session_state.tab1_grades_df = None
 
     # Display grades if they exist in Tab 1 session state
     if st.session_state.tab1_grades_df is not None and not st.session_state.tab1_grades_df.empty:
         # Show current filter info for Tab 1
         if st.session_state.tab1_loaded_filters:
-            st.info(f"📋 Tab 1 - Showing grades for: **{st.session_state.tab1_loaded_filters.get('semester', 'All')}** | **{st.session_state.tab1_loaded_filters.get('subject', 'All')}** | **{st.session_state.tab1_loaded_filters.get('section', 'All')}**")
+            st.info(f"📋 Tab 1 - Showing grades for: **{st.session_state.tab1_loaded_filters.get('semester', 'All')}** | **{st.session_state.tab1_loaded_filters.get('subject', 'All')}**")
 
         st.divider()
-        display_grades_table(new_curriculum, st.session_state.tab1_grades_df, st.session_state.tab1_current_faculty,
+        display_grades_table(new_curriculum, st.session_state.tab1_grades_df,
                            st.session_state.tab1_loaded_filters.get('semester'),
-                           st.session_state.tab1_loaded_filters.get('subject'),
-                           st.session_state.tab1_loaded_filters.get('section'))
+                           st.session_state.tab1_loaded_filters.get('subject'))
 
     elif st.session_state.tab1_grades_df is not None and st.session_state.tab1_grades_df.empty:
         st.warning("No students found matching the current filters.")

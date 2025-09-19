@@ -7,6 +7,9 @@ import numpy as np
 import os
 import time
 import json
+import matplotlib.pyplot as plt
+from reportlab.platypus import Image
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
 from reportlab.lib.pagesizes import letter
@@ -115,12 +118,26 @@ def get_enrollment_trends(data, filters):
 
     return enrollment
 
-def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semester, max_enrollment, unique_semesters, course_filter=None, yoy_analysis=False):
+def create_enrollment_trends_pdf(
+    enrollment_df,
+    total_enrollment,
+    avg_per_semester,
+    max_enrollment,
+    unique_semesters,
+    course_filter=None,
+    yoy_analysis=False
+):
     """Generate PDF report for enrollment trends"""
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
-                          topMargin=72, bottomMargin=18)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=18
+    )
 
     elements = []
 
@@ -133,7 +150,6 @@ def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semest
         alignment=TA_CENTER,
         textColor=colors.darkblue
     )
-
     header_style = ParagraphStyle(
         'CustomHeader',
         parent=styles['Heading2'],
@@ -142,7 +158,6 @@ def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semest
         alignment=TA_LEFT,
         textColor=colors.black
     )
-
     info_style = ParagraphStyle(
         'InfoStyle',
         parent=styles['Normal'],
@@ -151,11 +166,11 @@ def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semest
         alignment=TA_LEFT
     )
 
-    # Title
+    # --- Title ---
     elements.append(Paragraph("📉 Enrollment Trends Analysis Report", title_style))
     elements.append(Spacer(1, 12))
 
-    # Report Information
+    # --- Report Information ---
     filter_info = f"""
     <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
     <b>Course Filter:</b> {course_filter if course_filter and course_filter != "All" else "All Courses"}<br/>
@@ -164,7 +179,7 @@ def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semest
     elements.append(Paragraph(filter_info, info_style))
     elements.append(Spacer(1, 20))
 
-    # Overall Summary Statistics
+    # --- Overall Summary Statistics ---
     elements.append(Paragraph("Overall Enrollment Summary", header_style))
     elements.append(Spacer(1, 6))
 
@@ -184,35 +199,51 @@ def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semest
     elements.append(overall_table)
     elements.append(Spacer(1, 20))
 
-    # Enrollment Data Table
-    elements.append(Paragraph("Detailed Enrollment Data", header_style))
-    elements.append(Spacer(1, 6))
-
-    # Prepare data for table
+    # ===================== YOY ANALYSIS =====================
     if yoy_analysis:
-        table_data = [enrollment_df.columns.tolist()] + enrollment_df.values.tolist()
-    else:
-        overall_enrollment = enrollment_df.groupby("Semester")["Count"].sum().reset_index()
-        overall_enrollment = overall_enrollment.sort_values("Semester")
-        table_data = [overall_enrollment.columns.tolist()] + overall_enrollment.values.tolist()
+        elements.append(Paragraph("Year-over-Year Enrollment Trends", header_style))
+        elements.append(Spacer(1, 6))
 
-    enrollment_table = Table(table_data, repeatRows=1)
-    enrollment_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ]))
-    elements.append(enrollment_table)
-    elements.append(Spacer(1, 20))
+        # Table with SchoolYear + Semester + Course + Count
+        yoy_data = [enrollment_df.columns.tolist()] + enrollment_df.values.tolist()
+        yoy_table = Table(yoy_data, repeatRows=1)
+        yoy_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(yoy_table)
+        elements.append(Spacer(1, 20))
 
-    # Course Breakdown (if applicable)
-    if course_filter == "All" and not yoy_analysis:
-        course_breakdown = enrollment_df.groupby("Course")["Count"].sum().reset_index().sort_values("Count", ascending=False)
+        # --- Line Chart (YoY Trends) ---
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
 
+        for year, group in enrollment_df.groupby("SchoolYear"):
+            ax.plot(group["Semester"], group["Count"], marker="o", label=str(year))
+
+        ax.set_title("Enrollment Trends by School Year", fontsize=14, fontweight="bold")
+        ax.set_xlabel("Semester")
+        ax.set_ylabel("Enrollment Count")
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.legend(title="School Year")
+
+        img_bytes = BytesIO()
+        plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        img_bytes.seek(0)
+
+        elements.append(Image(img_bytes, width=6.5*inch, height=3.5*inch))
+        elements.append(Spacer(1, 20))
+
+        # --- Enrollment by Course (Table + Pie) ---
         elements.append(Paragraph("Enrollment by Course", header_style))
         elements.append(Spacer(1, 6))
 
+        course_breakdown = enrollment_df.groupby("Course")["Count"].sum().reset_index().sort_values("Count", ascending=False)
+
+        # Table
         course_data = [course_breakdown.columns.tolist()] + course_breakdown.values.tolist()
         course_table = Table(course_data, repeatRows=1)
         course_table.setStyle(TableStyle([
@@ -222,7 +253,113 @@ def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semest
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
         elements.append(course_table)
+        elements.append(Spacer(1, 12))
 
+        # Pie chart
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.pie(course_breakdown["Count"],
+               labels=course_breakdown["Course"],
+               autopct='%1.1f%%',
+               startangle=90)
+        ax.set_title("Enrollment Distribution by Course")
+
+        img_bytes = BytesIO()
+        plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        img_bytes.seek(0)
+
+        elements.append(Image(img_bytes, width=4.5*inch, height=4.5*inch))
+        elements.append(Spacer(1, 20))
+
+    # ===================== OVERALL ANALYSIS =====================
+    else:
+        elements.append(Paragraph("Overall Enrollment by Semester", header_style))
+        elements.append(Spacer(1, 6))
+
+        overall_enrollment = enrollment_df.groupby("Semester")["Count"].sum().reset_index()
+        overall_enrollment = overall_enrollment.sort_values("Semester")
+
+        # Table
+        table_data = [overall_enrollment.columns.tolist()] + overall_enrollment.values.tolist()
+        enrollment_table = Table(table_data, repeatRows=1)
+        enrollment_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(enrollment_table)
+        elements.append(Spacer(1, 20))
+
+        # --- Line Chart (Overall) ---
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(overall_enrollment["Semester"], overall_enrollment["Count"],
+                marker="o", color="blue", label="Overall Enrollment")
+        ax.set_title("Overall Enrollment Trends", fontsize=14, fontweight="bold")
+        ax.set_xlabel("Semester")
+        ax.set_ylabel("Enrollment Count")
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.legend()
+
+        img_bytes = BytesIO()
+        plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        img_bytes.seek(0)
+
+        elements.append(Image(img_bytes, width=6.5*inch, height=3.5*inch))
+        elements.append(Spacer(1, 20))
+
+        # --- Bar Chart (Overall per Semester) ---
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.bar(overall_enrollment["Semester"], overall_enrollment["Count"], color="skyblue")
+        ax.set_title("Enrollment by Semester", fontsize=14, fontweight="bold")
+        ax.set_xlabel("Semester")
+        ax.set_ylabel("Enrollment Count")
+        ax.grid(True, axis="y", linestyle="--", alpha=0.6)
+
+        img_bytes = BytesIO()
+        plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        img_bytes.seek(0)
+
+        elements.append(Image(img_bytes, width=6.5*inch, height=3.5*inch))
+        elements.append(Spacer(1, 20))
+
+        # --- Enrollment by Course (Table + Pie) ---
+        elements.append(Paragraph("Enrollment by Course", header_style))
+        elements.append(Spacer(1, 6))
+
+        course_breakdown = enrollment_df.groupby("Course")["Count"].sum().reset_index().sort_values("Count", ascending=False)
+
+        # Table
+        course_data = [course_breakdown.columns.tolist()] + course_breakdown.values.tolist()
+        course_table = Table(course_data, repeatRows=1)
+        course_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(course_table)
+        elements.append(Spacer(1, 12))
+
+        # Pie chart
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.pie(course_breakdown["Count"],
+               labels=course_breakdown["Course"],
+               autopct='%1.1f%%',
+               startangle=90)
+        ax.set_title("Enrollment Distribution by Course")
+
+        img_bytes = BytesIO()
+        plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        img_bytes.seek(0)
+
+        elements.append(Image(img_bytes, width=4.5*inch, height=4.5*inch))
+        elements.append(Spacer(1, 20))
+
+    # --- Build PDF ---
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()

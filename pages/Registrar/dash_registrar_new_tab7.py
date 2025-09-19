@@ -169,14 +169,23 @@ def get_pass_fail_distribution(data, filters):
         df['Subject'] = df['SubjectCode']
 
     return df
-
-def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_count, fail_count, pass_rate, course_filter=None, school_year_filter=None, semester_filter=None):
+def create_pass_fail_distribution_pdf(
+    subject_summary_df,
+    total_records,
+    pass_count,
+    fail_count,
+    pass_rate,
+    course_filter=None,
+    school_year_filter=None,
+    semester_filter=None
+):
     """Generate PDF report for pass/fail distribution by subject"""
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
-                          topMargin=72, bottomMargin=18)
-
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+        topMargin=72, bottomMargin=18
+    )
     elements = []
 
     styles = getSampleStyleSheet()
@@ -188,7 +197,6 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
         alignment=TA_CENTER,
         textColor=colors.darkblue
     )
-
     header_style = ParagraphStyle(
         'CustomHeader',
         parent=styles['Heading2'],
@@ -197,7 +205,6 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
         alignment=TA_LEFT,
         textColor=colors.black
     )
-
     info_style = ParagraphStyle(
         'InfoStyle',
         parent=styles['Normal'],
@@ -210,7 +217,7 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
     elements.append(Paragraph("📈 Subject Pass/Fail Distribution Report", title_style))
     elements.append(Spacer(1, 12))
 
-    # Report Information
+    # Report Info
     filter_info = f"""
     <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
     <b>Course Filter:</b> {course_filter if course_filter and course_filter != "All" else "All Courses"}<br/>
@@ -220,7 +227,7 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
     elements.append(Paragraph(filter_info, info_style))
     elements.append(Spacer(1, 20))
 
-    # Overall Summary Statistics
+    # --- Overall Summary
     elements.append(Paragraph("Overall Performance Summary", header_style))
     elements.append(Spacer(1, 6))
 
@@ -240,11 +247,10 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
     elements.append(overall_table)
     elements.append(Spacer(1, 20))
 
-    # Subject-wise Pass/Fail Distribution
+    # --- Subject-wise Summary
     elements.append(Paragraph("Subject-wise Pass/Fail Distribution", header_style))
     elements.append(Spacer(1, 6))
 
-    # Prepare data for table
     subj_table_data = [subject_summary_df.columns.tolist()] + subject_summary_df.values.tolist()
     subj_table = Table(subj_table_data, repeatRows=1)
     subj_table.setStyle(TableStyle([
@@ -256,79 +262,42 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
     elements.append(subj_table)
     elements.append(Spacer(1, 20))
 
-    # Top Performing Subjects
-    elements.append(Paragraph("Top Performing Subjects (Highest Pass Rates)", header_style))
-    elements.append(Spacer(1, 6))
-
-    top_subjects = subject_summary_df.nlargest(10, "Pass Rate (%)")
-    top_data = [["Subject", "Pass Rate (%)", "Fail Rate (%)", "Total Students"]] + top_subjects.values.tolist()
-    top_table = Table(top_data, repeatRows=1)
-    top_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ]))
-    elements.append(top_table)
-    elements.append(Spacer(1, 20))
-
-    # Subjects Needing Attention
-    elements.append(Paragraph("Subjects Needing Attention (Lowest Pass Rates)", header_style))
-    elements.append(Spacer(1, 6))
-
-    low_subjects = subject_summary_df.nsmallest(10, "Pass Rate (%)")
-    low_data = [["Subject", "Pass Rate (%)", "Fail Rate (%)", "Total Students"]] + low_subjects.values.tolist()
-    low_table = Table(low_data, repeatRows=1)
-    low_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightcoral),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ]))
-    elements.append(low_table)
-    elements.append(Spacer(1, 20))
-
-    # Charts
-    # Bar Chart: Pass/Fail Distribution by Subject
+    # --- Bar Chart (Dashboard-style)
     elements.append(Paragraph("Pass/Fail Distribution by Subject", header_style))
     elements.append(Spacer(1, 6))
 
     if not subject_summary_df.empty:
-        # Sort by pass rate for cleaner visualization
-        subject_summary_df = subject_summary_df.sort_values('Pass Rate (%)', ascending=False)
+        fig, ax = plt.subplots(figsize=(12, 6))
 
-        # Limit to top 20 subjects to avoid overcrowding
-        if len(subject_summary_df) > 20:
-            subject_summary_df = subject_summary_df.head(20)
+        # Plot Pass and Fail grouped (like Plotly dashboard)
+        bar_width = 0.35
+        x = np.arange(len(subject_summary_df["Subject"]))
 
-        fig, ax = plt.subplots(figsize=(14, 8))
-        subject_summary_df.set_index('Subject').plot(kind='bar', ax=ax, color=['#2E8B57', '#DC143C'], width=0.8)
-        ax.set_title("Pass/Fail Distribution by Subject (Top 20)", fontsize=16, fontweight='bold')
-        ax.set_ylabel("Number of Students", fontsize=14)
-        ax.set_xlabel("Subject", fontsize=14)
-        ax.grid(True, axis='y', linestyle='--', alpha=0.7)
-        ax.legend(loc='upper right', fontsize=12)
-        ax.set_xticklabels(subject_summary_df.index, fontsize=10, rotation=45, ha='center')
-        plt.yticks(fontsize=12)
-        # Add labels on bars
-        for container in ax.containers:
-            ax.bar_label(container, fmt='%d', fontsize=9, padding=3)
+        ax.bar(x - bar_width/2, subject_summary_df["Pass"], bar_width, label="Pass", color="#2E8B57")
+        ax.bar(x + bar_width/2, subject_summary_df["Fail"], bar_width, label="Fail", color="#DC143C")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(subject_summary_df["Subject"], rotation=45, ha="right", fontsize=9)
+        ax.set_ylabel("Number of Students")
+        ax.set_title("Pass/Fail Distribution by Subject", fontsize=14, fontweight="bold")
+        ax.legend()
+
         plt.tight_layout()
-
         img_bytes = BytesIO()
         plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
         plt.close(fig)
         img_bytes.seek(0)
 
-        elements.append(Image(img_bytes, width=10*inch, height=6*inch))
+        elements.append(Image(img_bytes, width=7.5*inch, height=4.5*inch))
         elements.append(Spacer(1, 12))
 
-    # Pie Chart: Overall Pass/Fail Distribution
+    # --- Pie Chart
     elements.append(Paragraph("Overall Pass/Fail Distribution", header_style))
     elements.append(Spacer(1, 6))
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.pie([pass_count, fail_count], labels=['Pass', 'Fail'], autopct='%1.1f%%', colors=['#2E8B57', '#DC143C'])
+    ax.pie([pass_count, fail_count], labels=['Pass', 'Fail'],
+           autopct='%1.1f%%', colors=['#2E8B57', '#DC143C'])
     ax.set_title("Overall Pass/Fail Distribution")
 
     img_bytes = BytesIO()
@@ -340,7 +309,6 @@ def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_co
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()
-
 def add_pass_fail_distribution_pdf_download_button(subject_summary_df, total_records, pass_count, fail_count, pass_rate, course_filter=None, school_year_filter=None, semester_filter=None):
     """Add a download button for pass/fail distribution PDF export"""
 
