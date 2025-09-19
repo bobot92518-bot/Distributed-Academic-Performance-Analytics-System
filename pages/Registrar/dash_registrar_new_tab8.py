@@ -5,6 +5,18 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 import os
+import time
+import json
+from concurrent.futures import ThreadPoolExecutor
+from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from reportlab.lib import colors
+from datetime import datetime
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -102,6 +114,146 @@ def get_enrollment_trends(data, filters):
     enrollment = enrollment.sort_values(['SchoolYear', 'Semester'])
 
     return enrollment
+
+def create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semester, max_enrollment, unique_semesters, course_filter=None, yoy_analysis=False):
+    """Generate PDF report for enrollment trends"""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        textColor=colors.black
+    )
+
+    info_style = ParagraphStyle(
+        'InfoStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    # Title
+    elements.append(Paragraph("📉 Enrollment Trends Analysis Report", title_style))
+    elements.append(Spacer(1, 12))
+
+    # Report Information
+    filter_info = f"""
+    <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
+    <b>Course Filter:</b> {course_filter if course_filter and course_filter != "All" else "All Courses"}<br/>
+    <b>Analysis Type:</b> {"Year-over-Year" if yoy_analysis else "Overall Trends"}
+    """
+    elements.append(Paragraph(filter_info, info_style))
+    elements.append(Spacer(1, 20))
+
+    # Overall Summary Statistics
+    elements.append(Paragraph("Overall Enrollment Summary", header_style))
+    elements.append(Spacer(1, 6))
+
+    overall_stats_data = [
+        ["Metric", "Value"],
+        ["Total Enrollment", f"{total_enrollment:,}"],
+        ["Average per Semester", f"{avg_per_semester:.0f}"],
+        ["Peak Enrollment", f"{max_enrollment:,}"],
+        ["Semesters Tracked", unique_semesters]
+    ]
+    overall_table = Table(overall_stats_data, repeatRows=1)
+    overall_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(overall_table)
+    elements.append(Spacer(1, 20))
+
+    # Enrollment Data Table
+    elements.append(Paragraph("Detailed Enrollment Data", header_style))
+    elements.append(Spacer(1, 6))
+
+    # Prepare data for table
+    if yoy_analysis:
+        table_data = [enrollment_df.columns.tolist()] + enrollment_df.values.tolist()
+    else:
+        overall_enrollment = enrollment_df.groupby("Semester")["Count"].sum().reset_index()
+        overall_enrollment = overall_enrollment.sort_values("Semester")
+        table_data = [overall_enrollment.columns.tolist()] + overall_enrollment.values.tolist()
+
+    enrollment_table = Table(table_data, repeatRows=1)
+    enrollment_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(enrollment_table)
+    elements.append(Spacer(1, 20))
+
+    # Course Breakdown (if applicable)
+    if course_filter == "All" and not yoy_analysis:
+        course_breakdown = enrollment_df.groupby("Course")["Count"].sum().reset_index().sort_values("Count", ascending=False)
+
+        elements.append(Paragraph("Enrollment by Course", header_style))
+        elements.append(Spacer(1, 6))
+
+        course_data = [course_breakdown.columns.tolist()] + course_breakdown.values.tolist()
+        course_table = Table(course_data, repeatRows=1)
+        course_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(course_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_enrollment_trends_pdf_download_button(enrollment_df, total_enrollment, avg_per_semester, max_enrollment, unique_semesters, course_filter=None, yoy_analysis=False):
+    """Add a download button for enrollment trends PDF export"""
+
+    if enrollment_df is None or enrollment_df.empty:
+        st.warning("No enrollment trends data available to export to PDF.")
+        return
+
+    try:
+        pdf_data = create_enrollment_trends_pdf(enrollment_df, total_enrollment, avg_per_semester, max_enrollment, unique_semesters, course_filter, yoy_analysis)
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Enrollment_Trends_Report_{timestamp}.pdf"
+
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download a comprehensive PDF report of enrollment trends",
+            key="download_pdf_tab8"
+        )
+
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        st.info("Please ensure all required data is properly loaded before generating the PDF.")
 
 def show_registrar_new_tab8_info(data, students_df, semesters_df):
     st.subheader("📉 Enrollment Trend Analysis")
@@ -224,6 +376,9 @@ def show_registrar_new_tab8_info(data, students_df, semesters_df):
                         title="Enrollment Distribution by Course"
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
+
+                st.subheader("📄 Export Report")
+                add_enrollment_trends_pdf_download_button(df, total_enrollment, avg_per_semester, max_enrollment, unique_semesters, course, yoy)
 
             else:
                 st.warning("No enrollment data available")

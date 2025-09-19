@@ -1,10 +1,5 @@
 import streamlit as st
 import streamlit.components.v1 as components
-### Ensure we scroll back to the teacher evaluation section if hash is present
-components.html(
-    '<script>window.addEventListener("load", function(){ if(location.hash=="#teacher-eval-anchor"){ setTimeout(function(){ try{ document.getElementById("teacher-eval-anchor").scrollIntoView({behavior:"instant", block:"start"}); }catch(e){} }, 0); }});</script>',
-    height=0,
-)
 import pandas as pd
 import os
 import plotly.express as px
@@ -212,6 +207,12 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
 
     # Define styles
     styles = getSampleStyleSheet()
+    cell_style = ParagraphStyle(
+        'CellStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        wordWrap='CJK'
+    )
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
@@ -351,8 +352,8 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
                 for i, (_, row) in enumerate(top10_year.iterrows(), 1):
                     top10_data.append([
                         str(i),
-                        str(row.get('Name', 'N/A')),
-                        str(row.get('Course', 'N/A')),
+                        Paragraph(str(row.get('Name', 'N/A')), cell_style),
+                        Paragraph(str(row.get('Course', 'N/A')), cell_style),
                         f"{row.get('GPA', 0):.1f}",
                         str(row.get('Status', 'N/A'))
                     ])
@@ -384,8 +385,8 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
                 probation_data = [['Student Name', 'Course', 'GPA', 'Total Units']]
                 for _, row in probation_year.iterrows():
                     probation_data.append([
-                        str(row.get('Name', 'N/A')),
-                        str(row.get('Course', 'N/A')),
+                        Paragraph(str(row.get('Name', 'N/A')), cell_style),
+                        Paragraph(str(row.get('Course', 'N/A')), cell_style),
                         f"{row.get('GPA', 0):.1f}",
                         str(row.get('TotalUnits', 0))
                     ])

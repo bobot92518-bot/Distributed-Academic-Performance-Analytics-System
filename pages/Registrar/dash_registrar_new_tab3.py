@@ -10,7 +10,13 @@ from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_c
 import time
 import json
 from datetime import datetime
-from pages.Registrar.dash_registrar_new_tab3_pdf import create_curriculum_pdf
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from reportlab.lib import colors
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -97,6 +103,183 @@ def load_curriculums_df():
         if col not in df.columns:
             df[col] = None
     return df
+
+def create_curriculum_pdf(curr_df, selected_course, selected_year, group_by_sem):
+    """Generate PDF report for curriculum data"""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        textColor=colors.black
+    )
+
+    info_style = ParagraphStyle(
+        'InfoStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    # Title
+    elements.append(Paragraph("📚 Curriculum Report", title_style))
+    elements.append(Spacer(1, 12))
+
+    # Report Information
+    report_info = f"""
+    <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
+    <b>Program Filter:</b> {selected_course if selected_course != "All" else "All Programs"}<br/>
+    <b>Curriculum Year Filter:</b> {selected_year if selected_year != "All" else "All Years"}<br/>
+    <b>Grouped by Semester:</b> {"Yes" if group_by_sem else "No"}
+    """
+    elements.append(Paragraph(report_info, info_style))
+    elements.append(Spacer(1, 20))
+
+    # Apply filters
+    filtered = curr_df.copy()
+    if selected_course != "All":
+        cc, cn = selected_course.split(" - ", 1)
+        filtered = filtered[(filtered["courseCode"].astype(str) == cc) & (filtered["courseName"].astype(str) == cn)]
+    if selected_year != "All":
+        filtered = filtered[filtered["curriculumYear"].astype(str) == selected_year]
+
+    if filtered.empty:
+        elements.append(Paragraph("No curriculum data found for the selected filters.", styles['Normal']))
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    # Iterate through matching curriculums
+    for _, row in filtered.iterrows():
+        elements.append(Paragraph(f"{row.get('courseCode', '')} - {row.get('courseName', '')} ({row.get('curriculumYear', '')})", header_style))
+        elements.append(Spacer(1, 12))
+
+        subjects = row.get("subjects", []) or []
+        if not subjects:
+            elements.append(Paragraph("No subjects found in this curriculum.", styles['Normal']))
+            elements.append(Spacer(1, 12))
+            continue
+
+        subj_df = pd.DataFrame(subjects)
+        # Normalize expected columns
+        expected_cols = [
+            "subjectCode", "subjectName", "yearLevel", "semester", "units", "lec", "lab", "prerequisite"
+        ]
+        for c in expected_cols:
+            if c not in subj_df.columns:
+                subj_df[c] = None
+
+        # Display grouped by YearLevel (and Semester optionally)
+        if group_by_sem and "semester" in subj_df.columns:
+            group_cols = ["yearLevel", "semester"]
+        else:
+            group_cols = ["yearLevel"]
+
+        try:
+            grouped = subj_df.groupby(group_cols)
+        except Exception:
+            # Fallback if grouping fails due to types
+            subj_df["yearLevel"] = subj_df["yearLevel"].astype(str)
+            if "semester" in subj_df.columns:
+                subj_df["semester"] = subj_df["semester"].astype(str)
+            grouped = subj_df.groupby(group_cols)
+
+        total_units_overall = 0
+        for grp_key, grp in grouped:
+            if isinstance(grp_key, tuple):
+                title = " - ".join([f"Year {grp_key[0]}"] + ([f"Sem {grp_key[1]}"] if len(grp_key) > 1 else []))
+            else:
+                title = f"Year {grp_key}"
+            elements.append(Paragraph(title, styles['Heading3']))
+            elements.append(Spacer(1, 6))
+
+            display_cols = [
+                "subjectCode", "subjectName", "lec", "lab", "units", "prerequisite"
+            ]
+            show_df = grp[display_cols].rename(columns={
+                "subjectCode": "Subject Code",
+                "subjectName": "Subject Name",
+                "lec": "Lec",
+                "lab": "Lab",
+                "units": "Units",
+                "prerequisite": "Prerequisite"
+            })
+
+            # Create table
+            table_data = [show_df.columns.tolist()] + show_df.values.tolist()
+            t = Table(table_data, repeatRows=1)
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ]))
+            elements.append(t)
+            elements.append(Spacer(1, 12))
+
+            # Totals
+            units_sum = pd.to_numeric(grp["units"], errors="coerce").fillna(0).sum()
+            lec_sum = pd.to_numeric(grp["lec"], errors="coerce").fillna(0).sum()
+            lab_sum = pd.to_numeric(grp["lab"], errors="coerce").fillna(0).sum()
+            total_units_overall += units_sum
+
+            totals_text = f"Total Units: {int(units_sum)}, Total Lec Hours: {int(lec_sum)}, Total Lab Hours: {int(lab_sum)}"
+            elements.append(Paragraph(totals_text, info_style))
+            elements.append(Spacer(1, 12))
+
+        overall_text = f"Overall Units in Curriculum: {int(total_units_overall)}"
+        elements.append(Paragraph(overall_text, styles['Heading4']))
+        elements.append(Spacer(1, 20))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_curriculum_pdf_download_button(curr_df, selected_course, selected_year, group_by_sem):
+    """Add a download button for curriculum PDF export"""
+
+    if curr_df is None or curr_df.empty:
+        st.warning("No curriculum data available to export to PDF.")
+        return
+
+    try:
+        pdf_data = create_curriculum_pdf(curr_df, selected_course, selected_year, group_by_sem)
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Curriculum_Report_{timestamp}.pdf"
+
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download a comprehensive PDF report of the displayed curriculum",
+            key="download_pdf_tab3"
+        )
+
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        st.info("Please ensure all required data is properly loaded before generating the PDF.")
 
 def show_registrar_new_tab3_info(data, students_df, semesters_df, grades_df):
         st.subheader("📚 Curriculum Viewer")
@@ -199,14 +382,5 @@ def show_registrar_new_tab3_info(data, students_df, semesters_df, grades_df):
                     st.success(f"Overall Units in Curriculum: {int(total_units_overall)}")
                     st.markdown("---")
 
-                # PDF Download Button
-                if st.button("📥 Generate Curriculum PDF", key="curriculum_pdf"):
-                    with st.spinner("Generating PDF..."):
-                        pdf_buffer = create_curriculum_pdf(filtered, selected_course, selected_year, group_by_sem)
-                        st.download_button(
-                            label="📥 Download Curriculum PDF",
-                            data=pdf_buffer,
-                            file_name=f"curriculum_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                            mime="application/pdf"
-                        )
-                    st.success("PDF generated successfully!")
+        st.subheader("📄 Export Report")
+        add_curriculum_pdf_download_button(curr_df, selected_course, selected_year, group_by_sem)

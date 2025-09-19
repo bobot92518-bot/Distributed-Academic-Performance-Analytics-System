@@ -311,7 +311,7 @@ def show_registrar_dashboard_new():
     with tab4:
         show_registrar_new_tab4_info(data, students_df, semesters_df, teachers_df, grades_df)
     with tab5:
-        show_registrar_new_tab5_info(data, students_df, semesters_df, teachers_df)
+        show_registrar_new_tab5_info(data, students_df, semesters_df, teachers_df, data['grades'])
     with tab6:
         show_registrar_new_tab6_info(data, students_df, semesters_df)
     with tab7:

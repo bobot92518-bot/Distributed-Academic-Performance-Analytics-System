@@ -9,6 +9,14 @@ import os
 import json
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from reportlab.lib import colors
+from datetime import datetime
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -142,6 +150,153 @@ def get_top_performers(data, filters):
     
     return top_performers
 
+def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, max_gpa, unique_courses):
+    """Generate PDF report for top performers"""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        textColor=colors.black
+    )
+
+    info_style = ParagraphStyle(
+        'InfoStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    # Title
+    elements.append(Paragraph("🏆 Top Performers Report", title_style))
+    elements.append(Spacer(1, 12))
+
+    # Report Information
+    report_info = f"""
+    <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
+    <b>Semester Filter:</b> {semester_filter if semester_filter != "All" else "All Semesters"}
+    """
+    elements.append(Paragraph(report_info, info_style))
+    elements.append(Spacer(1, 20))
+
+    # Summary Statistics
+    elements.append(Paragraph("Summary Statistics", header_style))
+    elements.append(Spacer(1, 6))
+
+    summary_data = [
+        ["Metric", "Value"],
+        ["Total Top Performers", f"{total_performers:,}"],
+        ["Average GPA", f"{avg_gpa:.2f}"],
+        ["Highest GPA", f"{max_gpa:.2f}"],
+        ["Programs Represented", unique_courses]
+    ]
+    summary_table = Table(summary_data, repeatRows=1)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+
+    # Program Performance Comparison
+    elements.append(Paragraph("Program Performance Comparison", header_style))
+    elements.append(Spacer(1, 6))
+
+    program_stats = df.groupby("Course").agg({
+        "GPA": ["mean", "max", "count"]
+    }).round(2)
+    program_stats.columns = ["Average GPA", "Highest GPA", "Top Performers Count"]
+    program_stats = program_stats.sort_values("Average GPA", ascending=False)
+
+    program_data = [program_stats.columns.tolist()] + program_stats.values.tolist()
+    program_table = Table(program_data, repeatRows=1)
+    program_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(program_table)
+    elements.append(Spacer(1, 20))
+
+    # Top Performers by Program
+    elements.append(Paragraph("Top Performers by Program", header_style))
+    elements.append(Spacer(1, 6))
+
+    df_ranked = df.copy()
+    df_ranked["Rank"] = df_ranked.groupby("Course")["GPA"].rank(method="dense", ascending=False).astype(int)
+    df_ranked = df_ranked.sort_values(["Course", "Rank"])
+
+    for course in df_ranked["Course"].unique():
+        course_data = df_ranked[df_ranked["Course"] == course].head(10)
+        elements.append(Paragraph(f"📚 {course}", header_style))
+        elements.append(Spacer(1, 6))
+
+        course_display = course_data[["Rank", "Name", "YearLevel", "GPA"]].copy()
+        course_display.columns = ["Rank", "Student Name", "Year Level", "GPA"]
+
+        course_table_data = [course_display.columns.tolist()] + course_display.values.tolist()
+        course_table = Table(course_table_data, repeatRows=1)
+        course_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(course_table)
+        elements.append(Spacer(1, 12))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_top_performers_pdf_download_button(df, semester_filter, total_performers, avg_gpa, max_gpa, unique_courses):
+    """Add a download button for top performers PDF export"""
+
+    if df is None or df.empty:
+        st.warning("No top performers data available to export to PDF.")
+        return
+
+    try:
+        pdf_data = create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, max_gpa, unique_courses)
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Top_Performers_Report_{timestamp}.pdf"
+
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download a comprehensive PDF report of top performers",
+            key="download_pdf_tab11"
+        )
+
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        st.info("Please ensure all required data is properly loaded before generating the PDF.")
 
 def show_registrar_new_tab11_info(data, students_df, semesters_df):
         st.subheader("🏆 Top Performers per Program")
@@ -223,6 +378,10 @@ def show_registrar_new_tab11_info(data, students_df, semesters_df):
                     
                     st.subheader("Program Performance Comparison")
                     st.dataframe(program_stats, use_container_width=True)
+
+                    # PDF Export
+                    st.subheader("📄 Export Report")
+                    add_top_performers_pdf_download_button(df, top_semester, total_performers, avg_gpa, max_gpa, unique_courses)
 
                 else:
                     st.warning("No top performers data available")

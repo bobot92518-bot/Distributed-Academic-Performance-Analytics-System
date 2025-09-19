@@ -1,21 +1,26 @@
 import streamlit as st
 import streamlit.components.v1 as components
-### Ensure we scroll back to the teacher evaluation section if hash is present
-components.html(
-    '<script>window.addEventListener("load", function(){ if(location.hash=="#teacher-eval-anchor"){ setTimeout(function(){ try{ document.getElementById("teacher-eval-anchor").scrollIntoView({behavior:"instant", block:"start"}); }catch(e){} }, 0); }});</script>',
-    height=0,
-)
 import pandas as pd
 import os
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
 from pages.Registrar.pdf_helper import generate_pdf
 import time
 import json
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from reportlab.lib import colors
+from datetime import datetime
+import textwrap
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -165,6 +170,205 @@ def get_pass_fail_distribution(data, filters):
 
     return df
 
+def create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_count, fail_count, pass_rate, course_filter=None, school_year_filter=None, semester_filter=None):
+    """Generate PDF report for pass/fail distribution by subject"""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        textColor=colors.black
+    )
+
+    info_style = ParagraphStyle(
+        'InfoStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    # Title
+    elements.append(Paragraph("📈 Subject Pass/Fail Distribution Report", title_style))
+    elements.append(Spacer(1, 12))
+
+    # Report Information
+    filter_info = f"""
+    <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
+    <b>Course Filter:</b> {course_filter if course_filter and course_filter != "All" else "All Courses"}<br/>
+    <b>School Year Filter:</b> {school_year_filter if school_year_filter and school_year_filter != "All" else "All Years"}<br/>
+    <b>Semester Filter:</b> {semester_filter if semester_filter and semester_filter != "All" else "All Semesters"}
+    """
+    elements.append(Paragraph(filter_info, info_style))
+    elements.append(Spacer(1, 20))
+
+    # Overall Summary Statistics
+    elements.append(Paragraph("Overall Performance Summary", header_style))
+    elements.append(Spacer(1, 6))
+
+    overall_stats_data = [
+        ["Metric", "Value"],
+        ["Total Records", f"{total_records:,}"],
+        ["Pass Count", f"{pass_count:,}"],
+        ["Fail Count", f"{fail_count:,}"],
+        ["Overall Pass Rate (%)", f"{pass_rate:.1f}%"]
+    ]
+    overall_table = Table(overall_stats_data, repeatRows=1)
+    overall_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(overall_table)
+    elements.append(Spacer(1, 20))
+
+    # Subject-wise Pass/Fail Distribution
+    elements.append(Paragraph("Subject-wise Pass/Fail Distribution", header_style))
+    elements.append(Spacer(1, 6))
+
+    # Prepare data for table
+    subj_table_data = [subject_summary_df.columns.tolist()] + subject_summary_df.values.tolist()
+    subj_table = Table(subj_table_data, repeatRows=1)
+    subj_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(subj_table)
+    elements.append(Spacer(1, 20))
+
+    # Top Performing Subjects
+    elements.append(Paragraph("Top Performing Subjects (Highest Pass Rates)", header_style))
+    elements.append(Spacer(1, 6))
+
+    top_subjects = subject_summary_df.nlargest(10, "Pass Rate (%)")
+    top_data = [["Subject", "Pass Rate (%)", "Fail Rate (%)", "Total Students"]] + top_subjects.values.tolist()
+    top_table = Table(top_data, repeatRows=1)
+    top_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(top_table)
+    elements.append(Spacer(1, 20))
+
+    # Subjects Needing Attention
+    elements.append(Paragraph("Subjects Needing Attention (Lowest Pass Rates)", header_style))
+    elements.append(Spacer(1, 6))
+
+    low_subjects = subject_summary_df.nsmallest(10, "Pass Rate (%)")
+    low_data = [["Subject", "Pass Rate (%)", "Fail Rate (%)", "Total Students"]] + low_subjects.values.tolist()
+    low_table = Table(low_data, repeatRows=1)
+    low_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightcoral),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(low_table)
+    elements.append(Spacer(1, 20))
+
+    # Charts
+    # Bar Chart: Pass/Fail Distribution by Subject
+    elements.append(Paragraph("Pass/Fail Distribution by Subject", header_style))
+    elements.append(Spacer(1, 6))
+
+    if not subject_summary_df.empty:
+        # Sort by pass rate for cleaner visualization
+        subject_summary_df = subject_summary_df.sort_values('Pass Rate (%)', ascending=False)
+
+        # Limit to top 20 subjects to avoid overcrowding
+        if len(subject_summary_df) > 20:
+            subject_summary_df = subject_summary_df.head(20)
+
+        fig, ax = plt.subplots(figsize=(14, 8))
+        subject_summary_df.set_index('Subject').plot(kind='bar', ax=ax, color=['#2E8B57', '#DC143C'], width=0.8)
+        ax.set_title("Pass/Fail Distribution by Subject (Top 20)", fontsize=16, fontweight='bold')
+        ax.set_ylabel("Number of Students", fontsize=14)
+        ax.set_xlabel("Subject", fontsize=14)
+        ax.grid(True, axis='y', linestyle='--', alpha=0.7)
+        ax.legend(loc='upper right', fontsize=12)
+        ax.set_xticklabels(subject_summary_df.index, fontsize=10, rotation=45, ha='center')
+        plt.yticks(fontsize=12)
+        # Add labels on bars
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%d', fontsize=9, padding=3)
+        plt.tight_layout()
+
+        img_bytes = BytesIO()
+        plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        img_bytes.seek(0)
+
+        elements.append(Image(img_bytes, width=10*inch, height=6*inch))
+        elements.append(Spacer(1, 12))
+
+    # Pie Chart: Overall Pass/Fail Distribution
+    elements.append(Paragraph("Overall Pass/Fail Distribution", header_style))
+    elements.append(Spacer(1, 6))
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.pie([pass_count, fail_count], labels=['Pass', 'Fail'], autopct='%1.1f%%', colors=['#2E8B57', '#DC143C'])
+    ax.set_title("Overall Pass/Fail Distribution")
+
+    img_bytes = BytesIO()
+    plt.savefig(img_bytes, format="png")
+    plt.close(fig)
+    img_bytes.seek(0)
+    elements.append(Image(img_bytes, width=4.5*inch, height=4.5*inch))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_pass_fail_distribution_pdf_download_button(subject_summary_df, total_records, pass_count, fail_count, pass_rate, course_filter=None, school_year_filter=None, semester_filter=None):
+    """Add a download button for pass/fail distribution PDF export"""
+
+    if subject_summary_df is None or subject_summary_df.empty:
+        st.warning("No pass/fail distribution data available to export to PDF.")
+        return
+
+    try:
+        pdf_data = create_pass_fail_distribution_pdf(subject_summary_df, total_records, pass_count, fail_count, pass_rate, course_filter, school_year_filter, semester_filter)
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Pass_Fail_Distribution_Report_{timestamp}.pdf"
+
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download a comprehensive PDF report of subject pass/fail distribution",
+            key="download_pdf_tab7"
+        )
+
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        st.info("Please ensure all required data is properly loaded before generating the PDF.")
+
 def show_registrar_new_tab7_info(data, students_df, semesters_df):
         st.subheader("📈 Subject Pass/Fail Distribution")
         st.markdown("Analyze pass/fail rates by subject with detailed breakdowns and visualizations")
@@ -241,6 +445,9 @@ def show_registrar_new_tab7_info(data, students_df, semesters_df):
                         color_discrete_map={"Pass": "#2E8B57", "Fail": "#DC143C"}
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
+
+                    st.subheader("📄 Export Report")
+                    add_pass_fail_distribution_pdf_download_button(subject_summary, total_records, pass_count, fail_count, pass_rate, course, year, semester)
 
                 else:
                     st.warning("No data available for the selected filters")

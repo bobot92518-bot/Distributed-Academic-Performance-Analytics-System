@@ -7,6 +7,14 @@ import os
 import json
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from reportlab.lib import colors
+from datetime import datetime
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -129,6 +137,153 @@ def get_retention_dropout(data, filters):
                                                      var_name="Status", value_name="Count")
     return summary, year_level_summary
 
+def create_retention_pdf(summary, year_level_summary, course_filter, total_students, retained_count, dropped_count, retention_rate):
+    """Generate PDF report for retention and dropout rates"""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        textColor=colors.black
+    )
+
+    info_style = ParagraphStyle(
+        'InfoStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    # Title
+    elements.append(Paragraph("🔄 Retention and Dropout Rates Report", title_style))
+    elements.append(Spacer(1, 12))
+
+    # Report Information
+    report_info = f"""
+    <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
+    <b>Course Filter:</b> {course_filter if course_filter != "All" else "All Courses"}
+    """
+    elements.append(Paragraph(report_info, info_style))
+    elements.append(Spacer(1, 20))
+
+    # Summary Statistics
+    elements.append(Paragraph("Summary Statistics", header_style))
+    elements.append(Spacer(1, 6))
+
+    summary_data = [
+        ["Metric", "Value"],
+        ["Total Students", f"{total_students:,}"],
+        ["Retained", f"{retained_count:,}"],
+        ["Dropped", f"{dropped_count:,}"],
+        ["Retention Rate", f"{retention_rate:.1f}%"]
+    ]
+    summary_table = Table(summary_data, repeatRows=1)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+
+    # Overall Retention Summary
+    elements.append(Paragraph("Overall Retention Summary", header_style))
+    elements.append(Spacer(1, 6))
+
+    summary_display = summary.copy()
+    summary_display["Percentage"] = (summary_display["Count"] / total_students * 100).round(1)
+    summary_display.columns = ["Status", "Count", "Percentage (%)"]
+
+    overall_data = [summary_display.columns.tolist()] + summary_display.values.tolist()
+    overall_table = Table(overall_data, repeatRows=1)
+    overall_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(overall_table)
+    elements.append(Spacer(1, 20))
+
+    # Year Level Analysis
+    if not year_level_summary.empty:
+        elements.append(Paragraph("Retention Analysis by Year Level", header_style))
+        elements.append(Spacer(1, 6))
+
+        year_level_pivot = year_level_summary.pivot(index="YearLevel", columns="Status", values="Count").fillna(0)
+        for col in ["Retained", "Dropped"]:
+            if col not in year_level_pivot.columns:
+                year_level_pivot[col] = 0
+        year_level_pivot = year_level_pivot[["Retained", "Dropped"]]
+        year_level_pivot["Total"] = year_level_pivot["Retained"] + year_level_pivot["Dropped"]
+        year_level_pivot["Retention_Rate"] = np.where(
+            year_level_pivot["Total"] > 0,
+            (year_level_pivot["Retained"] / year_level_pivot["Total"] * 100).round(1),
+            0
+        )
+
+        display_df = year_level_pivot[["Retained", "Dropped", "Total", "Retention_Rate"]].copy()
+        display_df.columns = ["Retained", "Dropped", "Total", "Retention Rate (%)"]
+
+        year_level_data = [display_df.columns.tolist()] + display_df.values.tolist()
+        year_level_table = Table(year_level_data, repeatRows=1)
+        year_level_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ]))
+        elements.append(year_level_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_retention_pdf_download_button(summary, year_level_summary, course_filter, total_students, retained_count, dropped_count, retention_rate):
+    """Add a download button for retention PDF export"""
+
+    if summary is None or summary.empty:
+        st.warning("No retention data available to export to PDF.")
+        return
+
+    try:
+        pdf_data = create_retention_pdf(summary, year_level_summary, course_filter, total_students, retained_count, dropped_count, retention_rate)
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Retention_Dropout_Report_{timestamp}.pdf"
+
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download a comprehensive PDF report of retention and dropout rates",
+            key="download_pdf_tab10"
+        )
+
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        st.info("Please ensure all required data is properly loaded before generating the PDF.")
+
 def show_registrar_new_tab10_info(data, students_df, semesters_df):
     st.subheader("🔄 Retention and Dropout Rates")
     st.markdown("Analyze student retention and dropout patterns by year level and course")
@@ -227,7 +382,11 @@ def show_registrar_new_tab10_info(data, students_df, semesters_df):
                 summary_display["Percentage"] = (summary_display["Count"] / total_students * 100).round(1)
                 summary_display.columns = ["Status", "Count", "Percentage (%)"]
                 st.dataframe(summary_display, use_container_width=True)
-                
+
+                # PDF Export
+                st.subheader("📄 Export Report")
+                add_retention_pdf_download_button(summary, year_level_summary, course, total_students, retained_count, dropped_count, retention_rate)
+
             else:
                 st.warning("No retention data available")
     else:

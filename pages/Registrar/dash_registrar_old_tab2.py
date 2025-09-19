@@ -1,10 +1,5 @@
 import streamlit as st
 import streamlit.components.v1 as components
-### Ensure we scroll back to the teacher evaluation section if hash is present
-components.html(
-    '<script>window.addEventListener("load", function(){ if(location.hash=="#teacher-eval-anchor"){ setTimeout(function(){ try{ document.getElementById("teacher-eval-anchor").scrollIntoView({behavior:"instant", block:"start"}); }catch(e){} }, 0); }});</script>',
-    height=0,
-)
 import pandas as pd
 import os
 import plotly.express as px

@@ -9,11 +9,172 @@ import os
 import json
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from io import BytesIO
+from reportlab.lib import colors
+from datetime import datetime
 
 def export_to_excel(df, filename):
     """Export DataFrame to Excel"""
     df.to_excel(filename, index=False)
     print(f"Exported to {filename}")
+
+def create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts):
+    """Generate PDF report for incomplete grades"""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        textColor=colors.black
+    )
+
+    info_style = ParagraphStyle(
+        'InfoStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    # Title
+    elements.append(Paragraph("⚠️ Incomplete Grades Report", title_style))
+    elements.append(Spacer(1, 12))
+
+    # Report Information
+    report_info = f"""
+    <b>Generated on:</b> {datetime.now().strftime("%B %d, %Y at %I:%M %p")}<br/>
+    <b>Semester Filter:</b> {semester_filter if semester_filter != "All" else "All Semesters"}<br/>
+    <b>Faculty Filter:</b> {faculty_filter if faculty_filter != "All" else "All Faculty"}
+    """
+    elements.append(Paragraph(report_info, info_style))
+    elements.append(Spacer(1, 20))
+
+    # Summary Statistics
+    elements.append(Paragraph("Summary Statistics", header_style))
+    elements.append(Spacer(1, 6))
+
+    summary_data = [
+        ["Metric", "Value"],
+        ["Total Incomplete Grades", f"{total_incomplete:,}"],
+        ["Affected Students", f"{unique_students:,}"],
+        ["Affected Subjects", f"{unique_subjects:,}"],
+        ["Involved Faculty", f"{unique_teachers:,}"]
+    ]
+    summary_table = Table(summary_data, repeatRows=1)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+
+    # Grade Type Distribution
+    elements.append(Paragraph("Grade Type Distribution", header_style))
+    elements.append(Spacer(1, 6))
+
+    grade_type_data = [["Grade Type", "Count", "Percentage"]]
+    total_types = grade_type_counts.sum()
+    for grade_type, count in grade_type_counts.items():
+        percentage = (count / total_types * 100) if total_types > 0 else 0
+        grade_type_data.append([grade_type, str(count), f"{percentage:.1f}%"])
+
+    grade_type_table = Table(grade_type_data, repeatRows=1)
+    grade_type_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+    ]))
+    elements.append(grade_type_table)
+    elements.append(Spacer(1, 20))
+
+    # Detailed Data Table
+    elements.append(Paragraph("Detailed Incomplete Grades Report", header_style))
+    elements.append(Spacer(1, 6))
+
+    # Prepare data for table
+    display_df = df[["StudentID", "Name", "SubjectCodes", "Grades", "TeacherName", "SemesterName", "GradeType"]].copy()
+    table_data = [display_df.columns.tolist()] + display_df.values.tolist()
+
+    # Create table with word wrapping
+    wrap_style = ParagraphStyle(
+        'WrapStyle',
+        fontSize=8,
+        leading=10,
+        alignment=TA_LEFT
+    )
+
+    def wrap_text(cell):
+        if isinstance(cell, str):
+            return Paragraph(cell, wrap_style)
+        return cell
+
+    table_data_wrapped = [[wrap_text(cell) for cell in row] for row in table_data]
+
+    data_table = Table(table_data_wrapped, repeatRows=1, colWidths=[1*inch, 1.5*inch, 1.5*inch, 1*inch, 1.5*inch, 1*inch, 1*inch])
+    data_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    elements.append(data_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_incomplete_grades_pdf_download_button(df, semester_filter, faculty_filter, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts):
+    """Add a download button for incomplete grades PDF export"""
+
+    if df is None or df.empty:
+        st.warning("No incomplete grades data available to export to PDF.")
+        return
+
+    try:
+        pdf_data = create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts)
+
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Incomplete_Grades_Report_{timestamp}.pdf"
+
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_data,
+            file_name=filename,
+            mime="application/pdf",
+            type="secondary",
+            help="Download a comprehensive PDF report of incomplete grades",
+            key="download_pdf_tab9"
+        )
+
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        st.info("Please ensure all required data is properly loaded before generating the PDF.")
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -219,6 +380,8 @@ def show_registrar_new_tab9_info(data, students_df, semesters_df, teachers_df):
                             filename = f"incomplete_grades_{semester}_{faculty}.xlsx"
                             export_to_excel(display_df, filename)
                             st.success(f"Exported to {filename}")
+                    with col2:
+                        add_incomplete_grades_pdf_download_button(df, semester, faculty, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts)
                     
                 else:
                     st.success("✅ No incomplete grades found for the selected filters")
