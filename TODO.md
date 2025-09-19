@@ -1,9 +1,5 @@
-# TODO for Redoing PDF Bar Graph in Tab7
+# TODO
 
-- [x] Increase figure size for the bar graph in PDF to improve readability
-- [x] Adjust font sizes for title, axis labels, and ticks
-- [x] Implement text wrapping for long subject names on y-axis
-- [x] Limit the bar graph to top 20 subjects if there are more than 20 to avoid overcrowding
-- [x] Improve legend position and styling
-- [x] Ensure color contrast and distinctness for pass/fail bars
-- [x] Test the PDF generation to verify improvements (changes made to add bar labels)
+- [x] Fix KeyError 'StudentID' in pages/Registrar/dash_registrar_new_tab6.py by adding "StudentID" column to the returned DataFrame in get_academic_standing function and updating column selection accordingly.
+- [x] Update PDF in dash_registrar_new_tab6 to show top 10 probationary students per academic year instead of all, and update the header to match.
+- [ ] Test the dash_registrar_new_tab6 dashboard and PDF generation to confirm the fixes work correctly.

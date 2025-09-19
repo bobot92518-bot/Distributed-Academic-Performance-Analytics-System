@@ -112,6 +112,9 @@ def get_enrollment_trends(data, filters):
     if filters.get("Course") != "All":
         merged = merged[merged["Course"] == filters["Course"]]
 
+    # Drop duplicates to ensure unique students per semester
+    merged = merged.drop_duplicates(subset=['StudentID', 'SemesterID'])
+
     # Count students per semester and course
     enrollment = merged.groupby(['Semester', 'SchoolYear', 'Course']).size().reset_index(name='Count')
     enrollment = enrollment.sort_values(['SchoolYear', 'Semester'])
@@ -426,11 +429,14 @@ def show_registrar_new_tab8_info(data, students_df, semesters_df):
                 df = merged.groupby(['Semester', 'SchoolYear', 'Course']).size().reset_index(name='Count')
                 df = df.sort_values(['SchoolYear', 'Semester'])
 
+                # Get unique students count
+                unique_students = merged.drop_duplicates('StudentID').shape[0]
+
             if not df.empty:
                 # === Summary statistics ===
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    total_enrollment = df["Count"].sum()
+                    total_enrollment = unique_students
                     st.metric("Total Enrollment", f"{total_enrollment:,}")
                 with col2:
                     avg_per_semester = df["Count"].mean()

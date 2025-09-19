@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -72,77 +73,82 @@ def create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_inco
     elements.append(Paragraph(report_info, info_style))
     elements.append(Spacer(1, 20))
 
-    # Summary Statistics
-    elements.append(Paragraph("Summary Statistics", header_style))
-    elements.append(Spacer(1, 6))
+    if df.empty:
+        # If no data, add a message
+        elements.append(Paragraph("NO STUDENT INCOMPLETE GRADES", header_style))
+        elements.append(Spacer(1, 12))
+    else:
+        # Summary Statistics
+        elements.append(Paragraph("Summary Statistics", header_style))
+        elements.append(Spacer(1, 6))
 
-    summary_data = [
-        ["Metric", "Value"],
-        ["Total Incomplete Grades", f"{total_incomplete:,}"],
-        ["Affected Students", f"{unique_students:,}"],
-        ["Affected Subjects", f"{unique_subjects:,}"],
-        ["Involved Faculty", f"{unique_teachers:,}"]
-    ]
-    summary_table = Table(summary_data, repeatRows=1)
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-    ]))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 20))
+        summary_data = [
+            ["Metric", "Value"],
+            ["Total Incomplete Grades", f"{total_incomplete:,}"],
+            ["Affected Students", f"{unique_students:,}"],
+            ["Affected Subjects", f"{unique_subjects:,}"],
+            ["Involved Faculty", f"{unique_teachers:,}"]
+        ]
+        summary_table = Table(summary_data, repeatRows=1)
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ]))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 20))
 
-    # Grade Type Distribution
-    elements.append(Paragraph("Grade Type Distribution", header_style))
-    elements.append(Spacer(1, 6))
+        # Grade Type Distribution
+        elements.append(Paragraph("Grade Type Distribution", header_style))
+        elements.append(Spacer(1, 6))
 
-    grade_type_data = [["Grade Type", "Count", "Percentage"]]
-    total_types = grade_type_counts.sum()
-    for grade_type, count in grade_type_counts.items():
-        percentage = (count / total_types * 100) if total_types > 0 else 0
-        grade_type_data.append([grade_type, str(count), f"{percentage:.1f}%"])
+        grade_type_data = [["Grade Type", "Count", "Percentage"]]
+        total_types = grade_type_counts.sum()
+        for grade_type, count in grade_type_counts.items():
+            percentage = (count / total_types * 100) if total_types > 0 else 0
+            grade_type_data.append([grade_type, str(count), f"{percentage:.1f}%"])
 
-    grade_type_table = Table(grade_type_data, repeatRows=1)
-    grade_type_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-    ]))
-    elements.append(grade_type_table)
-    elements.append(Spacer(1, 20))
+        grade_type_table = Table(grade_type_data, repeatRows=1)
+        grade_type_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ]))
+        elements.append(grade_type_table)
+        elements.append(Spacer(1, 20))
 
-    # Detailed Data Table
-    elements.append(Paragraph("Detailed Incomplete Grades Report", header_style))
-    elements.append(Spacer(1, 6))
+        # Detailed Data Table
+        elements.append(Paragraph("Detailed Incomplete Grades Report", header_style))
+        elements.append(Spacer(1, 6))
 
-    # Prepare data for table
-    display_df = df[["StudentID", "Name", "SubjectCodes", "Grades", "TeacherName", "SemesterName", "GradeType"]].copy()
-    table_data = [display_df.columns.tolist()] + display_df.values.tolist()
+        # Prepare data for table
+        display_df = df[["StudentID", "Name", "SubjectCodes", "Grades", "TeacherName", "SemesterName", "GradeType"]].copy()
+        table_data = [display_df.columns.tolist()] + display_df.values.tolist()
 
-    # Create table with word wrapping
-    wrap_style = ParagraphStyle(
-        'WrapStyle',
-        fontSize=8,
-        leading=10,
-        alignment=TA_LEFT
-    )
+        # Create table with word wrapping
+        wrap_style = ParagraphStyle(
+            'WrapStyle',
+            fontSize=8,
+            leading=10,
+            alignment=TA_LEFT
+        )
 
-    def wrap_text(cell):
-        if isinstance(cell, str):
-            return Paragraph(cell, wrap_style)
-        return cell
+        def wrap_text(cell):
+            if isinstance(cell, str):
+                return Paragraph(cell, wrap_style)
+            return cell
 
-    table_data_wrapped = [[wrap_text(cell) for cell in row] for row in table_data]
+        table_data_wrapped = [[wrap_text(cell) for cell in row] for row in table_data]
 
-    data_table = Table(table_data_wrapped, repeatRows=1, colWidths=[1*inch, 1.5*inch, 1.5*inch, 1*inch, 1.5*inch, 1*inch, 1*inch])
-    data_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    elements.append(data_table)
+        data_table = Table(table_data_wrapped, repeatRows=1, colWidths=[1*inch, 1.5*inch, 1.5*inch, 1*inch, 1.5*inch, 1*inch, 1*inch])
+        data_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements.append(data_table)
 
     doc.build(elements)
     buffer.seek(0)
@@ -151,8 +157,8 @@ def create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_inco
 def add_incomplete_grades_pdf_download_button(df, semester_filter, faculty_filter, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts):
     """Add a download button for incomplete grades PDF export"""
 
-    if df is None or df.empty:
-        st.warning("No incomplete grades data available to export to PDF.")
+    if df is None:
+        st.warning("No data available to export to PDF.")
         return
 
     try:
@@ -175,6 +181,47 @@ def add_incomplete_grades_pdf_download_button(df, semester_filter, faculty_filte
     except Exception as e:
         st.error(f"Error generating PDF: {str(e)}")
         st.info("Please ensure all required data is properly loaded before generating the PDF.")
+
+def add_incomplete_grades_pdf_print_button(df, semester_filter, faculty_filter, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts):
+    """Add a print button for incomplete grades PDF"""
+
+    if df is None:
+        st.warning("No data available to print PDF.")
+        return
+
+    try:
+        pdf_data = create_incomplete_grades_pdf(df, semester_filter, faculty_filter, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts)
+
+        # Convert PDF data to base64 for JS
+        import base64
+        pdf_base64 = base64.b64encode(pdf_data).decode('utf-8')
+
+        # HTML and JS to create blob and print
+        html_code = f"""
+        <button onclick="printPDF()" style="background-color: #f0f2f6; border: 1px solid #d3d3d3; border-radius: 0.25rem; padding: 0.25rem 0.75rem; font-size: 0.875rem; color: #262730; cursor: pointer;">🖨️ Print PDF Report</button>
+        <script>
+        function printPDF() {{
+            const pdfData = '{pdf_base64}';
+            const byteCharacters = atob(pdfData);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {{
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }}
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], {{ type: 'application/pdf' }});
+            const url = URL.createObjectURL(blob);
+            const newWindow = window.open(url, '_blank');
+            newWindow.onload = function() {{
+                newWindow.print();
+            }};
+        }}
+        </script>
+        """
+
+        components.html(html_code, height=50)
+
+    except Exception as e:
+        st.error(f"Error generating PDF for print: {str(e)}")
 
 @st.cache_data(ttl=300)
 def load_all_data_new():
@@ -314,23 +361,23 @@ def show_registrar_new_tab9_info(data, students_df, semesters_df, teachers_df):
         if st.button("Apply Filters", key="incomplete_apply"):
             with st.spinner("Loading incomplete grades data..."):
                 df = get_incomplete_grades(data, {"Semester": semester, "Faculty": faculty})
-                
+
+                # Summary statistics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    total_incomplete = len(df)
+                    st.metric("Total Incomplete", f"{total_incomplete:,}")
+                with col2:
+                    unique_students = df["StudentID"].nunique() if not df.empty else 0
+                    st.metric("Affected Students", f"{unique_students:,}")
+                with col3:
+                    unique_subjects = df["SubjectCodes"].nunique() if not df.empty else 0
+                    st.metric("Affected Subjects", unique_subjects)
+                with col4:
+                    unique_teachers = df["TeacherName"].nunique() if not df.empty else 0
+                    st.metric("Involved Faculty", unique_teachers)
+
                 if not df.empty:
-                    # Summary statistics
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        total_incomplete = len(df)
-                        st.metric("Total Incomplete", f"{total_incomplete:,}")
-                    with col2:
-                        unique_students = df["StudentID"].nunique()
-                        st.metric("Affected Students", f"{unique_students:,}")
-                    with col3:
-                        unique_subjects = df["SubjectCodes"].nunique()
-                        st.metric("Affected Subjects", unique_subjects)
-                    with col4:
-                        unique_teachers = df["TeacherName"].nunique()
-                        st.metric("Involved Faculty", unique_teachers)
-                    
                     # Incomplete grades by type
                     def categorize_grade(grade):
                         if isinstance(grade, list):
@@ -340,10 +387,10 @@ def show_registrar_new_tab9_info(data, students_df, semesters_df, teachers_df):
                         elif grade in ["INC", "Dropped", None] or pd.isna(grade):
                             return "Incomplete" if grade == "INC" else "Dropped" if grade == "Dropped" else "Missing"
                         return "Other"
-                    
+
                     df["GradeType"] = df["Grades"].apply(categorize_grade)
                     grade_type_counts = df["GradeType"].value_counts()
-                    
+
                     # Pie chart for incomplete grade types
                     fig_pie = px.pie(
                         values=grade_type_counts.values,
@@ -356,7 +403,7 @@ def show_registrar_new_tab9_info(data, students_df, semesters_df, teachers_df):
                         }
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
-                    
+
                     # Bar chart by faculty
                     faculty_counts = df["TeacherName"].value_counts().head(10)
                     fig_bar = px.bar(
@@ -367,23 +414,21 @@ def show_registrar_new_tab9_info(data, students_df, semesters_df, teachers_df):
                     )
                     fig_bar.update_layout(xaxis_tickangle=-45)
                     st.plotly_chart(fig_bar, use_container_width=True)
-                    
+
                     # Detailed data table
                     st.subheader("Detailed Incomplete Grades Report")
                     display_df = df[["StudentID", "Name", "SubjectCodes", "Grades", "TeacherName", "SemesterName", "GradeType"]].copy()
                     st.dataframe(display_df, use_container_width=True)
-                    
-                    # Export options
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("Export to Excel", key="export_incomplete_excel"):
-                            filename = f"incomplete_grades_{semester}_{faculty}.xlsx"
-                            export_to_excel(display_df, filename)
-                            st.success(f"Exported to {filename}")
-                    with col2:
-                        add_incomplete_grades_pdf_download_button(df, semester, faculty, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts)
-                    
+
                 else:
+                    grade_type_counts = pd.Series()
+                    display_df = pd.DataFrame()
                     st.success("✅ No incomplete grades found for the selected filters")
+
+                # Export options (always show)
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    add_incomplete_grades_pdf_download_button(df, semester, faculty, total_incomplete, unique_students, unique_subjects, unique_teachers, grade_type_counts)
+               
         else:
             st.info("👆 Click 'Apply Filters' to load incomplete grades data")

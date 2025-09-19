@@ -130,51 +130,35 @@ def get_academic_standing(data, filters):
     if filters.get("Course") != "All" and not merged.empty:
         merged = merged[merged["Course"] == filters["Course"]]
 
-    # Calculate GPA properly - handle both list and single values
-    def calculate_gpa(grades):
-        if isinstance(grades, list) and grades:
-            # Filter out non-numeric values and calculate average
-            numeric_grades = [g for g in grades if isinstance(g, (int, float)) and not pd.isna(g)]
-            return sum(numeric_grades) / len(numeric_grades) if numeric_grades else 0
-        elif isinstance(grades, (int, float)) and not pd.isna(grades):
-            return grades
-        return 0
+    # Aggregate grades per student per semester to avoid duplicates
+    if merged.empty:
+        return pd.DataFrame()
 
-    merged["GPA"] = merged["Grades"].apply(calculate_gpa)
+    # Define function to calculate GPA and total units per student per semester
+    def calculate_gpa_and_units(group):
+        grades = group["Grades"].tolist()
+        # Flatten grades if nested lists
+        flat_grades = []
+        for g in grades:
+            if isinstance(g, list):
+                flat_grades.extend([x for x in g if isinstance(x, (int, float)) and not pd.isna(x)])
+            elif isinstance(g, (int, float)) and not pd.isna(g):
+                flat_grades.append(g)
+        gpa = sum(flat_grades) / len(flat_grades) if flat_grades else 0
+        total_units = len(flat_grades)
+        return pd.Series({"GPA": gpa, "TotalUnits": total_units})
 
-    # Compute total units
-    def count_units(grades):
-        if isinstance(grades, list):
-            return len([g for g in grades if isinstance(g, (int, float)) and not pd.isna(g)])
-        return 1 if isinstance(grades, (int, float)) and not pd.isna(grades) else 0
+    agg = merged.groupby(["StudentID", "SemesterID"]).apply(calculate_gpa_and_units).reset_index()
 
-    merged["TotalUnits"] = merged["Grades"].apply(count_units)
+    # Merge aggregated GPA and units back with student info
+    student_info = students_df[["_id", "Name", "Course"]]
+    agg = agg.merge(student_info, left_on="StudentID", right_on="_id", how="left")
 
-    # Add semester and school year information
-    if not merged.empty:
-        unique_sem_ids = merged["SemesterID"].unique()
-        filtered_semesters = semesters_df[semesters_df["_id"].isin(unique_sem_ids)]
-        
-        semesters_dict = dict(zip(filtered_semesters["_id"], filtered_semesters["Semester"]))
-        years_dict = dict(zip(filtered_semesters["_id"], filtered_semesters["SchoolYear"]))
-        
-        merged["Semester"] = merged["SemesterID"].map(semesters_dict)
-        merged["SchoolYear"] = merged["SemesterID"].map(years_dict)
-        
-        # Add subject information
-        if not subjects_df.empty:
-            subjects_dict = dict(zip(subjects_df["_id"], subjects_df["Description"]))
-            merged["Subject"] = merged["SubjectCodes"].apply(
-                lambda x: subjects_dict.get(x[0] if isinstance(x, list) and x else x, str(x))
-            )
-        else:
-            merged["Subject"] = merged["SubjectCodes"].apply(
-                lambda x: str(x[0] if isinstance(x, list) and x else x)
-            )
-    else:
-        merged["Semester"] = ""
-        merged["SchoolYear"] = ""
-        merged["Subject"] = ""
+    # Add semester and school year info
+    semesters_dict = dict(zip(semesters_df["_id"], semesters_df["Semester"]))
+    years_dict = dict(zip(semesters_df["_id"], semesters_df["SchoolYear"]))
+    agg["Semester"] = agg["SemesterID"].map(semesters_dict)
+    agg["SchoolYear"] = agg["SemesterID"].map(years_dict)
 
     # Determine academic status with proper thresholds
     def get_academic_status(gpa: float) -> str:
@@ -185,15 +169,15 @@ def get_academic_standing(data, filters):
         else:
             return "Probation"
 
-    merged["Status"] = merged["GPA"].apply(get_academic_status)
+    agg["Status"] = agg["GPA"].apply(get_academic_status)
 
-    # Ensure all required columns exist
-    required_columns = ["Name", "Course", "GPA", "TotalUnits", "Status", "Semester", "SchoolYear", "Subject"]
-    for col in required_columns:
-        if col not in merged.columns:
-            merged[col] = ""
+    # Add Subject column as empty or placeholder since aggregation loses subject details
+    agg["Subject"] = ""
 
-    return merged[required_columns].drop_duplicates()
+    # Select and order columns
+    result = agg[["StudentID", "Name", "Course", "GPA", "TotalUnits", "Status", "Semester", "SchoolYear", "Subject"]]
+
+    return result
 
 def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None, semester_filter=None):
     """Generate comprehensive PDF report for academic standing data"""
@@ -260,7 +244,7 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
         return buffer.getvalue()
 
     # Overall Summary Statistics
-    total_students = len(df)
+    total_students = df['StudentID'].nunique()
     deans_list_count = len(df[df["Status"] == "Dean's List"])
     good_standing_count = len(df[df["Status"] == "Good Standing"])
     probation_count = len(df[df["Status"] == "Probation"])
@@ -309,7 +293,7 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
             elements.append(Spacer(1, 12))
 
             # Year Statistics
-            year_total = len(year_df)
+            year_total = year_df['StudentID'].nunique()
             year_deans = len(year_df[year_df["Status"] == "Dean's List"])
             year_good = len(year_df[year_df["Status"] == "Good Standing"])
             year_probation = len(year_df[year_df["Status"] == "Probation"])
@@ -376,10 +360,14 @@ def create_academic_standing_pdf(df, course_filter=None, school_year_filter=None
                 elements.append(Spacer(1, 15))
 
             # Probation Students for this year
-            probation_year = year_df[year_df["Status"] == "Probation"].sort_values("GPA", ascending=True)
+            probation_year = (
+                year_df[year_df["Status"] == "Probation"]
+                .sort_values("GPA", ascending=True)
+                .head(10)
+            )
 
             if not probation_year.empty:
-                elements.append(Paragraph("<b>⚠️ Students on Academic Probation</b>", info_style))
+                elements.append(Paragraph("<b>⚠️ Top 10 Students on Academic Probation</b>", info_style))
                 elements.append(Spacer(1, 6))
 
                 probation_data = [['Student Name', 'Course', 'GPA', 'Total Units']]
@@ -494,7 +482,7 @@ def show_registrar_new_tab6_info(data, students_df, semesters_df):
                     # === Summary Metrics ===
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        total_students = len(df)
+                        total_students = df['StudentID'].nunique()
                         st.metric("Total Students", total_students)
                     with col2:
                         deans_list = len(df[df["Status"] == "Dean's List"])
@@ -506,24 +494,43 @@ def show_registrar_new_tab6_info(data, students_df, semesters_df):
                         probation = len(df[df["Status"] == "Probation"])
                         st.metric("Probation", probation)
 
-                    # === TOP 10 STUDENTS PER SCHOOL YEAR ===
-                    st.subheader("🏆 Top 10 Students Per School Year")
-                    top10_per_year = (
-                        df.sort_values(["SchoolYear", "GPA"], ascending=[True, False])
-                        .groupby("SchoolYear")
-                        .head(10)
-                    )
-                    st.dataframe(top10_per_year, use_container_width=True)
+                    # Group by School Year for detailed analysis
+                    if 'SchoolYear' in df.columns:
+                        school_years = sorted(df['SchoolYear'].dropna().unique())
 
-                    # === TOP 10 PROBATIONARY STUDENTS PER SCHOOL YEAR ===
-                    st.subheader("⚠️ Top 10 Probationary Students Per School Year")
-                    top10_probation = (
-                        df[df["Status"] == "Probation"]
-                        .sort_values(["SchoolYear", "GPA"], ascending=[True, True])
-                        .groupby("SchoolYear")
-                        .head(10)
-                    )
-                    st.dataframe(top10_probation, use_container_width=True)
+                        for school_year in school_years:
+                            year_df = df[df['SchoolYear'] == school_year]
+
+                            if year_df.empty:
+                                continue
+
+                            st.markdown(f"### Academic Year: {school_year}")
+
+                            # Top 10 Students for this year
+                            top10_year = (
+                                year_df.sort_values("GPA", ascending=False)
+                                .head(10)
+                            )
+
+                            if not top10_year.empty:
+                                st.markdown("**🏆 Top 10 Performing Students**")
+                                # Display as table with selected columns
+                                display_top10 = top10_year[['Name', 'Course', 'GPA', 'Status']].copy()
+                                display_top10.insert(0, 'Rank', range(1, len(display_top10) + 1))
+                                st.table(display_top10)
+
+                            # Probation Students for this year
+                            probation_year = (
+                                year_df[year_df["Status"] == "Probation"]
+                                .sort_values("GPA", ascending=True)
+                                .head(10)
+                            )
+
+                            if not probation_year.empty:
+                                st.markdown("**⚠️ Top 10 Students on Academic Probation**")
+                                # Display as table with selected columns
+                                display_probation = probation_year[['Name', 'Course', 'GPA', 'TotalUnits']].copy()
+                                st.table(display_probation)
                     
                     # === Generate PDF Report Button (Always Visible) ===
                     st.markdown("### 📄 Export Report")
