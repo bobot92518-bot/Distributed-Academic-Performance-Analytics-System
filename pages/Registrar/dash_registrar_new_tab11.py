@@ -6,11 +6,12 @@ from plotly.subplots import make_subplots
 import numpy as np
 import time
 import os
+import matplotlib.pyplot as plt
 import json
 from concurrent.futures import ThreadPoolExecutor
 from global_utils import load_pkl_data, pkl_data_to_df, students_cache, grades_cache, semesters_cache, subjects_cache, curriculums_cache
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -154,8 +155,14 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
     """Generate PDF report for top performers"""
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72,
-                          topMargin=72, bottomMargin=18)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=(595.27, 841.89),  # A4 in points
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=18,
+    )
 
     elements = []
 
@@ -166,7 +173,7 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
         fontSize=18,
         spaceAfter=30,
         alignment=TA_CENTER,
-        textColor=colors.darkblue
+        textColor=colors.darkblue,
     )
 
     header_style = ParagraphStyle(
@@ -175,7 +182,7 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
         fontSize=14,
         spaceAfter=12,
         alignment=TA_LEFT,
-        textColor=colors.black
+        textColor=colors.black,
     )
 
     info_style = ParagraphStyle(
@@ -183,7 +190,7 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
         parent=styles['Normal'],
         fontSize=10,
         spaceAfter=6,
-        alignment=TA_LEFT
+        alignment=TA_LEFT,
     )
 
     # Title
@@ -207,14 +214,18 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
         ["Total Top Performers", f"{total_performers:,}"],
         ["Average GPA", f"{avg_gpa:.2f}"],
         ["Highest GPA", f"{max_gpa:.2f}"],
-        ["Programs Represented", unique_courses]
+        ["Programs Represented", unique_courses],
     ]
     summary_table = Table(summary_data, repeatRows=1)
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-    ]))
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ]
+        )
+    )
     elements.append(summary_table)
     elements.append(Spacer(1, 20))
 
@@ -222,21 +233,67 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
     elements.append(Paragraph("Program Performance Comparison", header_style))
     elements.append(Spacer(1, 6))
 
-    program_stats = df.groupby("Course").agg({
-        "GPA": ["mean", "max", "count"]
-    }).round(2)
+    program_stats = df.groupby("Course").agg({"GPA": ["mean", "max", "count"]}).round(2)
     program_stats.columns = ["Average GPA", "Highest GPA", "Top Performers Count"]
     program_stats = program_stats.sort_values("Average GPA", ascending=False)
 
-    program_data = [program_stats.columns.tolist()] + program_stats.values.tolist()
+    program_data = [program_stats.columns.tolist()] + program_stats.reset_index().values.tolist()
     program_table = Table(program_data, repeatRows=1)
-    program_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ]))
+    program_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
     elements.append(program_table)
+    elements.append(Spacer(1, 20))
+
+    # 📊 Add GPA Distribution Chart (Boxplot)
+    elements.append(Paragraph("📊 GPA Distribution by Program", header_style))
+    fig, ax = plt.subplots(figsize=(8, 4))
+    df.boxplot(column="GPA", by="Course", ax=ax, grid=False)
+
+    ax.set_title("GPA Distribution by Program")
+    ax.set_ylabel("GPA")
+    plt.suptitle("")
+    plt.xticks(rotation=45)
+    ax.grid(True, which="major", linestyle="--", alpha=0.7, axis="y")
+
+    img_bytes = BytesIO()
+    plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    img_bytes.seek(0)
+    elements.append(Image(img_bytes, width=6 * inch, height=3 * inch))
+    elements.append(Spacer(1, 20))
+
+    # 📈 Scatter Plot: Top Performers by Year Level and GPA
+    elements.append(Paragraph("📈 Top Performers by Year Level and GPA", header_style))
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    for course, group in df.groupby("Course"):
+        ax.scatter(
+            group["YearLevel"],
+            group["GPA"],
+            s=group["GPA"] * 10,  # bubble size
+            label=course,
+            alpha=0.6,
+        )
+
+    ax.set_title("Top Performers by Year Level and GPA")
+    ax.set_xlabel("Year Level")
+    ax.set_ylabel("GPA")
+    ax.legend(title="Course", fontsize=8)
+    ax.grid(True, linestyle="--", alpha=0.7)
+
+    img_bytes = BytesIO()
+    plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    img_bytes.seek(0)
+    elements.append(Image(img_bytes, width=6 * inch, height=3 * inch))
     elements.append(Spacer(1, 20))
 
     # Top Performers by Program
@@ -244,7 +301,9 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
     elements.append(Spacer(1, 6))
 
     df_ranked = df.copy()
-    df_ranked["Rank"] = df_ranked.groupby("Course")["GPA"].rank(method="dense", ascending=False).astype(int)
+    df_ranked["Rank"] = (
+        df_ranked.groupby("Course")["GPA"].rank(method="dense", ascending=False).astype(int)
+    )
     df_ranked = df_ranked.sort_values(["Course", "Rank"])
 
     for course in df_ranked["Course"].unique():
@@ -257,12 +316,16 @@ def create_top_performers_pdf(df, semester_filter, total_performers, avg_gpa, ma
 
         course_table_data = [course_display.columns.tolist()] + course_display.values.tolist()
         course_table = Table(course_table_data, repeatRows=1)
-        course_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ]))
+        course_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgreen),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
         elements.append(course_table)
         elements.append(Spacer(1, 12))
 

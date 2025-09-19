@@ -1,6 +1,6 @@
 {
-  "timestamp": 1758248530.4491382,
-  "load_time_seconds": 0.08217597007751465,
+  "timestamp": 1758254280.1176372,
+  "load_time_seconds": 0.1224524974822998,
   "records_loaded": {
     "students_new": 1000,
     "grades_new": 5000,
