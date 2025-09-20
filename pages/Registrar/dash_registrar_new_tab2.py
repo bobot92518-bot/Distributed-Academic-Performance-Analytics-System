@@ -469,7 +469,7 @@ def show_registrar_new_tab2_info(data, students_df, semesters_df, teachers_df):
                         def highlight_status(val):
                             if val == "FAILED":
                                 return "color: red; font-weight: bold;"
-                            return "color: white;"
+                            return "color: blue;"
 
                         styled = expanded.style.applymap(highlight_status, subset=["STATUS"])
 

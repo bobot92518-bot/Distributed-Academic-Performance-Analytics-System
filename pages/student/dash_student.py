@@ -782,7 +782,7 @@ def show_student_dashboard_new():
                         def highlight_status(val):
                             if val == "FAILED":
                                 return "color: red; font-weight: bold;"
-                            return "color: white;"
+                            return "color: blue;"
 
                         styled = expanded.style.applymap(highlight_status, subset=["STATUS"])
 
